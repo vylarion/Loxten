@@ -1,4 +1,4 @@
-# Loxtention
+# Loxten
 
 A Chrome extension for real-time website security analysis and threat detection with AI-powered anomaly detection.
 
