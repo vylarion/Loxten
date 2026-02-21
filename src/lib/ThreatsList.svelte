@@ -1,467 +1,505 @@
 <script lang="ts">
   import type { Threat } from './types';
+  import { Prohibit, FishSimple, Eye, Bug, Code, CurrencyBtc, CursorClick, Robot, Warning, ShieldCheck, Lightbulb, CaretDown, Flag, BookOpen, Info, X, ListPlus } from 'phosphor-svelte';
+  import { createEventDispatcher } from 'svelte';
 
   export let threats: Threat[] = [];
 
-  function getThreatIcon(type: string): string {
-    const icons: Record<string, string> = {
-      malicious_domain: '🚫',
-      phishing: '🎣',
-      tracker: '👁️',
-      malware: '🦠',
-      suspicious_script: '⚠️',
-      cryptomining: '⛏️',
-      clickjacking: '🖱️',
-      ai_detection: '🤖',
-      default: '⚠️'
+  const dispatch = createEventDispatcher();
+
+  function getThreatIcon(type: string) {
+    const icons: Record<string, any> = {
+      malicious_domain: Prohibit,
+      phishing: FishSimple,
+      tracker: Eye,
+      malware: Bug,
+      suspicious_script: Code,
+      cryptomining: CurrencyBtc,
+      clickjacking: CursorClick,
+      ai_detection: Robot,
     };
-    return icons[type] || icons.default;
+    return icons[type] || Warning;
   }
 
-  function getSeverityColor(severity: string): string {
-    const colors: Record<string, string> = {
-      low: '#22c55e',
-      medium: '#f59e0b',
-      high: '#ef4444',
-      critical: '#dc2626'
+  function getSeverityLabel(severity: string): string {
+    const labels: Record<string, string> = {
+      low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical'
     };
-    return colors[severity] || colors.medium;
+    return labels[severity] || 'Unknown';
   }
 
-  function getSeverityBadge(severity: string): string {
-    const badges: Record<string, string> = {
-      low: 'Low Risk',
-      medium: 'Medium Risk', 
-      high: 'High Risk',
-      critical: 'Critical'
-    };
-    return badges[severity] || 'Unknown';
-  }
-
-  function formatThreatType(type: string): string {
-    return type
-      .split('_')
-      .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+  function formatType(type: string): string {
+    return type.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
   function getRecommendation(threat: Threat): string {
-    const recommendations: Record<string, string> = {
-      malicious_domain: "Leave this website immediately and avoid sharing personal information.",
-      phishing: "Do not enter any passwords or personal details. This appears to be a phishing attempt.",
-      tracker: "Your browsing activity may be monitored. Consider using privacy mode.",
-      malware: "This site may contain harmful software. Scan your device for infections.",
-      suspicious_script: "Potentially malicious code detected. Avoid downloads from this site.",
-      cryptomining: "This website may be using your device to mine cryptocurrency without permission.",
-      clickjacking: "This page may be trying to trick you into clicking hidden elements.",
-      ai_detection: "Our AI system has flagged this content as potentially suspicious."
+    const recs: Record<string, string> = {
+      malicious_domain: 'Leave this website immediately. Do not share personal information.',
+      phishing: 'Do not enter passwords or personal details. This may be a phishing attempt.',
+      tracker: 'Your browsing may be monitored. Consider using privacy mode.',
+      malware: 'This site may contain harmful software. Scan your device.',
+      suspicious_script: 'Potentially malicious code detected. Avoid downloads.',
+      cryptomining: 'This site may be using your device to mine cryptocurrency.',
+      clickjacking: 'This page may trick you into clicking hidden elements.',
+      ai_detection: 'AI flagged this content as potentially suspicious.'
     };
-    return recommendations[threat.type] || "Exercise caution when browsing this website.";
+    return recs[threat.type] || 'Exercise caution when browsing this website.';
   }
 
   function toggleDetails(threat: Threat): void {
     threat.showDetails = !threat.showDetails;
-    threats = threats; // Trigger reactivity
+    threats = threats;
   }
+
+  function ignoreThreat(index: number): void {
+    threats[index].ignored = true;
+    threats = threats;
+  }
+
+  function undoIgnore(index: number): void {
+    threats[index].ignored = false;
+    threats = threats;
+  }
+
+  $: activeThreats = threats.filter(t => !t.ignored);
+  $: ignoredThreats = threats.filter(t => t.ignored);
 </script>
 
-<div class="threats-list">
+<div class="threats">
   {#if threats.length === 0}
-    <div class="no-threats">
-      <div class="success-icon">✅</div>
-      <h3>No Threats Detected</h3>
-      <p>This website appears to be safe. No security threats were found during our analysis.</p>
-      <div class="safety-tips">
-        <h4>Stay Safe Online:</h4>
+    <div class="clear-state">
+      <div class="clear-icon">
+        <ShieldCheck size={32} weight="light" />
+      </div>
+      <h3 class="clear-title">All Clear</h3>
+      <p class="clear-desc">No security threats were found on this website.</p>
+      <div class="tips">
+        <h4 class="tips-label">
+          <Info size={11} weight="bold" />
+          Stay Safe
+        </h4>
         <ul>
-          <li>Always verify website URLs before entering personal information</li>
-          <li>Look for HTTPS encryption (🔒) in your address bar</li>
-          <li>Be cautious of urgent requests for personal information</li>
-          <li>Keep your browser and extensions up to date</li>
+          <li>Verify URLs before entering personal information</li>
+          <li>Look for HTTPS in the address bar</li>
+          <li>Be wary of urgent requests for credentials</li>
+          <li>Keep your browser and extensions updated</li>
         </ul>
       </div>
     </div>
   {:else}
-    <div class="threats-header">
-      <h3>🚨 {threats.length} Security {threats.length === 1 ? 'Threat' : 'Threats'} Detected</h3>
-      <p>We found the following security issues on this website:</p>
+    <div class="threats-head">
+      <div class="threats-count">
+        <Warning size={13} weight="fill" />
+        <span>{activeThreats.length} {activeThreats.length === 1 ? 'Threat' : 'Threats'} Active</span>
+      </div>
+      {#if ignoredThreats.length > 0}
+        <p class="threats-sub">{ignoredThreats.length} ignored</p>
+      {:else}
+        <p class="threats-sub">Security issues found on this website</p>
+      {/if}
     </div>
 
-    <div class="threats-container">
-      {#each threats as threat, index}
-        <div class="threat-card" class:high-risk={threat.severity === 'high' || threat.severity === 'critical'}>
-          <div class="threat-header">
-            <div class="threat-icon">
-              {getThreatIcon(threat.type)}
+    <div class="threats-scroll">
+      {#each threats as threat, i}
+        <div class="card" class:ignored={threat.ignored}>
+          <div class="card-head">
+            <div class="card-icon">
+              <svelte:component this={getThreatIcon(threat.type)} size={15} weight="bold" />
             </div>
-            <div class="threat-title">
-              <h4>{formatThreatType(threat.type)}</h4>
-              <div 
-                class="severity-badge" 
-                style="background-color: {getSeverityColor(threat.severity)}20; color: {getSeverityColor(threat.severity)}"
-              >
-                {getSeverityBadge(threat.severity)}
-              </div>
+            <div class="card-meta">
+              <span class="card-type">{formatType(threat.type)}</span>
+              <span class="card-badge sev-{threat.severity}">
+                {getSeverityLabel(threat.severity)}
+              </span>
             </div>
           </div>
 
-          <div class="threat-description">
-            <p>{threat.description}</p>
-          </div>
-
-          <div class="threat-recommendation">
-            <div class="recommendation-header">
-              <strong>💡 Recommendation:</strong>
+          {#if !threat.ignored}
+            <p class="card-desc">{threat.description}</p>
+            <div class="card-rec">
+              <Lightbulb size={11} weight="bold" />
+              <span>{getRecommendation(threat)}</span>
             </div>
-            <p>{getRecommendation(threat)}</p>
-          </div>
 
-          {#if threat.details}
-            <div class="threat-details">
-              <button 
-                class="details-toggle"
-                on:click={() => toggleDetails(threat)}
-              >
-                {threat.showDetails ? 'Hide' : 'Show'} Technical Details
-                <span class="toggle-icon" class:rotated={threat.showDetails}>▼</span>
+            <!-- Quick actions -->
+            <div class="quick-actions">
+              <button class="qa-btn" on:click={() => ignoreThreat(i)} title="Dismiss this threat">
+                <X size={10} weight="bold" />
+                Ignore
               </button>
-              
+              <button class="qa-btn" on:click={() => alert('Whitelist feature coming in backend update')} title="Add domain to whitelist">
+                <ListPlus size={10} weight="bold" />
+                Whitelist
+              </button>
+            </div>
+
+            {#if threat.details}
+              <button class="details-btn" on:click={() => toggleDetails(threat)}>
+                <span>{threat.showDetails ? 'Hide' : 'Show'} Details</span>
+                <CaretDown size={10} weight="bold" class={threat.showDetails ? 'rotated' : ''} />
+              </button>
               {#if threat.showDetails}
-                <div class="details-content">
-                  <pre>{JSON.stringify(threat.details, null, 2)}</pre>
-                </div>
+                <pre class="details-code">{JSON.stringify(threat.details, null, 2)}</pre>
               {/if}
+            {/if}
+          {:else}
+            <div class="ignored-row">
+              <span class="ignored-text">Dismissed</span>
+              <button class="undo-btn" on:click={() => undoIgnore(i)}>Undo</button>
             </div>
           {/if}
         </div>
       {/each}
     </div>
 
-    <div class="threats-footer">
-      <div class="action-buttons">
-        <button class="report-button" on:click={() => alert('Report feature coming soon!')}>
-          📋 Report False Positive
-        </button>
-        <button class="learn-more-button" on:click={() => alert('Learn more feature coming soon!')}>
-          📖 Learn More About These Threats
-        </button>
-      </div>
-      
-      <div class="protection-tip">
-        <div class="tip-icon">💡</div>
-        <div class="tip-content">
-          <strong>Tip:</strong> Consider leaving this website if critical or high-risk threats are detected.
-          Your safety is our priority.
-        </div>
-      </div>
+    <div class="threats-actions">
+      <button class="action-btn" on:click={() => alert('Report feature coming soon')}>
+        <Flag size={11} weight="bold" />
+        Report
+      </button>
+      <button class="action-btn" on:click={() => alert('Learn more coming soon')}>
+        <BookOpen size={11} weight="bold" />
+        Learn More
+      </button>
     </div>
   {/if}
 </div>
 
 <style>
-  .threats-list {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .no-threats {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    padding: 24px 16px;
-    background: #121212;
-    border-radius: 8px;
-    border: 1px solid #333333;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  }
-
-  .success-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-  }
-
-  .no-threats h3 {
-    margin: 0 0 8px 0;
-    color: #166534;
-    font-size: 18px;
-  }
-
-  .no-threats p {
-    margin: 0 0 20px 0;
-    color: #166534;
-    opacity: 0.8;
-    font-size: 14px;
-  }
-
-  .safety-tips {
-    background: #0f0f0f;
-    padding: 16px;
-    border-radius: 8px;
-    text-align: left;
-    border: 1px solid #333333;
-  }
-
-  .safety-tips h4 {
-    margin: 0 0 12px 0;
-    color: #10b981;
-    font-size: 14px;
-  }
-
-  .safety-tips ul {
-    margin: 0;
-    padding-left: 16px;
-    color: #94a3b8;
-  }
-
-  .safety-tips li {
-    font-size: 12px;
-    margin-bottom: 4px;
-    opacity: 0.9;
-  }
-
-  .threats-header {
-    text-align: center;
-    padding: 16px;
-    background: #1a1a1a;
-    border-radius: 8px;
-    border: 1px solid #333333;
-  }
-
-  .threats-header h3 {
-    margin: 0 0 8px 0;
-    color: #ef4444;
-    font-size: 16px;
-  }
-
-  .threats-header p {
-    margin: 0;
-    color: #94a3b8;
-    font-size: 13px;
-    opacity: 0.8;
-  }
-
-  .threats-container {
+  .threats {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-height: 300px;
-    overflow-y: auto;
   }
 
-  .threat-card {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
-    border-radius: 12px;
-    margin-bottom: 16px;
-    overflow: hidden;
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-left: 3px solid #f59e0b;
-    padding: 20px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
+  /* Clear state */
+  .clear-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 28px 20px;
+    background: #0a0a0a;
+    border: 1px solid #181818;
+    border-radius: 14px;
   }
 
-  .threat-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-    opacity: 0;
-    transition: opacity 0.3s ease;
+  .clear-icon {
+    color: #707070;
+    margin-bottom: 12px;
   }
 
-  .threat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    border-color: rgba(255, 255, 255, 0.15);
+  .clear-title {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #d0d0d0;
   }
 
-  .threat-card:hover::before {
-    opacity: 1;
+  .clear-desc {
+    margin: 0 0 20px;
+    font-size: 11px;
+    color: #808080;
+    line-height: 1.5;
   }
 
-  .threat-card.high-risk {
-    border-left-color: #ef4444;
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%);
+  .tips {
+    width: 100%;
+    background: #070707;
+    border: 1px solid #161616;
+    border-radius: 10px;
+    padding: 14px 16px;
+    text-align: left;
   }
 
-  .threat-header {
+  .tips-label {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    gap: 6px;
+    margin: 0 0 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #606060;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
-  .threat-icon {
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  .tips ul {
+    margin: 0;
+    padding-left: 16px;
+    color: #808080;
+  }
+
+  .tips li {
+    font-size: 11px;
+    margin-bottom: 4px;
+    line-height: 1.5;
+  }
+
+  /* Threats header */
+  .threats-head {
+    text-align: center;
+    padding: 14px;
+    background: #0a0a0a;
+    border: 1px solid #181818;
     border-radius: 12px;
+  }
+
+  .threats-count {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
-    backdrop-filter: blur(10px);
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #d0d0d0;
+    margin-bottom: 4px;
   }
 
-  .threat-title {
+  .threats-sub {
+    margin: 0;
+    font-size: 11px;
+    color: #606060;
+  }
+
+  /* Cards */
+  .threats-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .threats-scroll::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .threats-scroll::-webkit-scrollbar-thumb {
+    background: #1e1e1e;
+    border-radius: 2px;
+  }
+
+  .card {
+    background: #0a0a0a;
+    border: 1px solid #181818;
+    border-left: 2px solid #404040;
+    border-radius: 10px;
+    padding: 14px 16px;
+    transition: opacity 0.2s ease;
+  }
+
+  .card.ignored {
+    opacity: 0.5;
+    border-left-color: #1e1e1e;
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .card.ignored .card-head {
+    margin-bottom: 0;
+  }
+
+  .card-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: #131313;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #808080;
+    flex-shrink: 0;
+  }
+
+  .card-meta {
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
 
-  .threat-title h4 {
-    margin: 0;
-    font-size: 15px;
+  .card-type {
+    font-size: 12px;
     font-weight: 600;
-    color: #e2e8f0;
+    color: #b0b0b0;
   }
 
-  .severity-badge {
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-size: 10px;
-    font-weight: 600;
+  .card-badge {
+    font-size: 9px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.025em;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border-radius: 6px;
+    color: #909090;
+    background: #161616;
+    border: 1px solid #1e1e1e;
   }
 
-  .threat-description {
-    margin-bottom: 12px;
+  .card-badge.sev-high,
+  .card-badge.sev-critical {
+    color: #b0b0b0;
+    border-color: #303030;
   }
 
-  .threat-description p {
-    margin: 0;
-    font-size: 13px;
-    color: #4b5563;
+  .card-desc {
+    margin: 0 0 10px;
+    font-size: 11px;
+    color: #808080;
     line-height: 1.5;
   }
 
-  .threat-recommendation {
-    background: #f8fafc;
-    padding: 12px;
-    border-radius: 6px;
-    border-left: 3px solid #3b82f6;
-    margin-bottom: 12px;
+  .card-rec {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 10px 12px;
+    background: #080808;
+    border: 1px solid #161616;
+    border-radius: 8px;
+    font-size: 11px;
+    color: #808080;
+    line-height: 1.5;
   }
 
-  .recommendation-header {
-    margin-bottom: 4px;
-    font-size: 12px;
-    color: #1e40af;
+  .card-rec :global(svg) {
+    flex-shrink: 0;
+    margin-top: 1px;
   }
 
-  .threat-recommendation p {
-    margin: 0;
-    font-size: 12px;
-    color: #1e40af;
-    line-height: 1.4;
+  /* Quick Actions */
+  .quick-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
   }
 
-  .threat-details {
-    border-top: 1px solid #e5e7eb;
-    padding-top: 12px;
-  }
-
-  .details-toggle {
-    background: none;
-    border: none;
-    color: #6366f1;
-    font-size: 12px;
-    cursor: pointer;
+  .qa-btn {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 0;
+    padding: 5px 10px;
+    border: 1px solid #1e1e1e;
+    border-radius: 6px;
+    background: #0e0e0e;
+    color: #707070;
+    font-size: 10px;
     font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
   }
 
-  .details-toggle:hover {
-    text-decoration: underline;
+  .qa-btn:hover {
+    background: #181818;
+    color: #a0a0a0;
+    border-color: #282828;
   }
 
-  .toggle-icon {
-    transition: transform 0.2s;
+  /* Ignored state */
+  .ignored-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
   }
 
-  .toggle-icon.rotated {
+  .ignored-text {
+    font-size: 11px;
+    color: #606060;
+    font-style: italic;
+  }
+
+  .undo-btn {
+    padding: 4px 10px;
+    border: 1px solid #1e1e1e;
+    border-radius: 5px;
+    background: transparent;
+    color: #707070;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+
+  .undo-btn:hover {
+    background: #181818;
+    color: #a0a0a0;
+  }
+
+  /* Details */
+  .details-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #606060;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 0.15s ease;
+  }
+
+  .details-btn:hover {
+    color: #909090;
+  }
+
+  .details-btn :global(.rotated) {
     transform: rotate(180deg);
   }
 
-  .details-content {
-    margin-top: 8px;
-    background: #1f2937;
-    padding: 8px;
-    border-radius: 4px;
-    overflow-x: auto;
-  }
-
-  .details-content pre {
-    margin: 0;
+  .details-code {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    background: #070707;
+    border: 1px solid #161616;
+    border-radius: 8px;
     font-size: 10px;
-    color: #e5e7eb;
-    font-family: 'Courier New', monospace;
+    color: #808080;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    overflow-x: auto;
+    white-space: pre-wrap;
   }
 
-  .threats-footer {
-    border-top: 1px solid #e5e7eb;
-    padding-top: 16px;
-  }
-
-  .action-buttons {
+  /* Actions */
+  .threats-actions {
     display: flex;
     gap: 8px;
-    margin-bottom: 16px;
   }
 
-  .report-button,
-  .learn-more-button {
+  .action-btn {
     flex: 1;
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    background: white;
-    border-radius: 6px;
-    font-size: 11px;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .report-button:hover,
-  .learn-more-button:hover {
-    background: #f9fafb;
-    border-color: #9ca3af;
-  }
-
-  .protection-tip {
     display: flex;
     align-items: center;
-    gap: 8px;
-    background: #fffbeb;
-    padding: 12px;
-    border-radius: 6px;
-    border: 1px solid #fed7aa;
-  }
-
-  .tip-icon {
-    font-size: 16px;
-  }
-
-  .tip-content {
-    flex: 1;
+    justify-content: center;
+    gap: 5px;
+    padding: 9px;
+    border: 1px solid #1e1e1e;
+    border-radius: 8px;
+    background: #0e0e0e;
+    color: #707070;
     font-size: 11px;
-    color: #92400e;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
   }
 
-  .tip-content strong {
-    color: #78350f;
+  .action-btn:hover {
+    background: #181818;
+    color: #909090;
+    border-color: #282828;
   }
 </style>

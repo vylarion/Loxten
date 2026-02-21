@@ -1,11 +1,11 @@
-// Content script for WebGuardian - monitors page content in real-time
-class WebGuardianContentScript {
+// Content script for Loxten - monitors page content in real-time
+class LoxtenContentScript {
   constructor() {
     this.observers = [];
     this.warningShown = false;
     this.suspiciousElements = [];
     this.trackerCount = 0;
-    
+
     // Only run on actual web pages
     if (this.shouldRun()) {
       this.init();
@@ -15,16 +15,16 @@ class WebGuardianContentScript {
   shouldRun() {
     // Don't run on extension pages, chrome pages, etc.
     const url = window.location.href;
-    return !url.startsWith('chrome://') && 
-           !url.startsWith('chrome-extension://') && 
-           !url.startsWith('moz-extension://') && 
-           !url.startsWith('about:');
+    return !url.startsWith('chrome://') &&
+      !url.startsWith('chrome-extension://') &&
+      !url.startsWith('moz-extension://') &&
+      !url.startsWith('about:');
   }
 
   init() {
     // Set up message listener first
     this.setupMessageListener();
-    
+
     // Wait for DOM to be ready
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
@@ -43,10 +43,13 @@ class WebGuardianContentScript {
       this.monitorForms();
       this.detectClickjacking();
       this.checkForCryptomining();
-      
-      console.log('WebGuardian content script initialized on:', window.location.hostname);
+
+      // Send page data to background for AI analysis after a short delay
+      setTimeout(() => this.sendPageDataForAI(), 2000);
+
+      console.log('Loxten content script initialized on:', window.location.hostname);
     } catch (error) {
-      console.error('WebGuardian content script error:', error);
+      console.error('Loxten content script error:', error);
     }
   }
 
@@ -63,6 +66,10 @@ class WebGuardianContentScript {
           case 'suspicious_elements':
             this.highlightSuspiciousElements(message.elements);
             break;
+          case 'extract_page_data':
+            const pageData = this.extractPageData();
+            sendResponse(pageData);
+            return true;
         }
         sendResponse({ success: true });
       } catch (error) {
@@ -103,7 +110,7 @@ class WebGuardianContentScript {
 
   checkForPhishingIndicators() {
     const indicators = [];
-    
+
     // Check page text for phishing keywords
     const pageText = document.body ? document.body.textContent.toLowerCase() : '';
     const phishingKeywords = [
@@ -150,7 +157,7 @@ class WebGuardianContentScript {
     images.forEach(img => {
       const alt = (img.alt || '').toLowerCase();
       const src = (img.src || '').toLowerCase();
-      
+
       if (securityKeywords.some(keyword => alt.includes(keyword) || src.includes(keyword))) {
         // Check if it's actually a legitimate security badge
         if (!this.isLegitimateSecurityBadge(img.src)) {
@@ -177,7 +184,7 @@ class WebGuardianContentScript {
       'thawte.com',
       'godaddy.com'
     ];
-    
+
     try {
       const url = new URL(src, window.location.href);
       return legitimateDomains.some(domain => url.hostname.includes(domain));
@@ -195,7 +202,7 @@ class WebGuardianContentScript {
         if (window.location.protocol !== 'https:') {
           this.showRealTimeWarning('⚠️ Password form on insecure connection!');
         }
-        
+
         if (form.method && form.method.toLowerCase() === 'get') {
           this.showRealTimeWarning('⚠️ Password form using insecure GET method!');
         }
@@ -282,15 +289,15 @@ class WebGuardianContentScript {
     hiddenElements.forEach(element => {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      
-      if ((style.display === 'none' || 
-           style.visibility === 'hidden' || 
-           style.opacity === '0' ||
-           rect.width < 5 || 
-           rect.height < 5) &&
-          (element.tagName.toLowerCase() === 'iframe' || 
-           element.innerHTML.includes('script'))) {
-        
+
+      if ((style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.opacity === '0' ||
+        rect.width < 5 ||
+        rect.height < 5) &&
+        (element.tagName.toLowerCase() === 'iframe' ||
+          element.innerHTML.includes('script'))) {
+
         this.reportSuspiciousContent([{
           type: 'hidden_malicious_element',
           element: element,
@@ -357,10 +364,10 @@ class WebGuardianContentScript {
     const checkCPU = () => {
       iterations++;
       const currentTime = performance.now();
-      
+
       if (currentTime - startTime > 1000) { // Check every second
         checkCount++;
-        
+
         // If we can't complete many iterations, CPU might be busy
         if (iterations < 50) {
           this.reportSuspiciousContent([{
@@ -369,16 +376,16 @@ class WebGuardianContentScript {
           }]);
           return; // Stop monitoring after detection
         }
-        
+
         startTime = currentTime;
         iterations = 0;
-        
+
         // Stop after checking for a reasonable time
         if (checkCount >= maxChecks) {
           return;
         }
       }
-      
+
       requestAnimationFrame(checkCPU);
     };
 
@@ -398,7 +405,7 @@ class WebGuardianContentScript {
   analyzeFormSubmission(form) {
     const formData = new FormData(form);
     const sensitiveFields = ['password', 'ssn', 'social', 'credit', 'card', 'cvv', 'security', 'pin'];
-    
+
     let hasSensitiveData = false;
     for (const [key, value] of formData.entries()) {
       const keyLower = key.toLowerCase();
@@ -412,11 +419,11 @@ class WebGuardianContentScript {
       const action = form.action || window.location.href;
       try {
         const actionUrl = new URL(action, window.location.href);
-        
+
         if (actionUrl.protocol !== 'https:') {
           this.showRealTimeWarning('🚨 Sensitive data being sent over insecure connection!');
         }
-        
+
         if (actionUrl.hostname !== window.location.hostname) {
           this.showRealTimeWarning('🚨 Sensitive data being sent to external domain!');
         }
@@ -429,7 +436,7 @@ class WebGuardianContentScript {
   analyzeNewElement(element) {
     // Analyze dynamically added elements
     if (!element.tagName) return;
-    
+
     switch (element.tagName.toLowerCase()) {
       case 'script':
         if (element.src && this.isSuspiciousScriptSource(new URL(element.src))) {
@@ -440,13 +447,13 @@ class WebGuardianContentScript {
           }]);
         }
         break;
-        
+
       case 'iframe':
         const style = window.getComputedStyle(element);
-        if (style.display === 'none' || 
-            style.visibility === 'hidden' ||
-            element.width < 10 || 
-            element.height < 10) {
+        if (style.display === 'none' ||
+          style.visibility === 'hidden' ||
+          element.width < 10 ||
+          element.height < 10) {
           this.reportSuspiciousContent([{
             type: 'hidden_iframe',
             element: element,
@@ -459,7 +466,7 @@ class WebGuardianContentScript {
 
   showSecurityWarning(analysis) {
     if (this.warningShown) return; // Don't show multiple warnings
-    
+
     this.warningShown = true;
     const modal = this.createWarningModal(analysis);
     document.body.appendChild(modal);
@@ -467,7 +474,7 @@ class WebGuardianContentScript {
 
   createWarningModal(analysis) {
     const modal = document.createElement('div');
-    modal.id = 'webguardian-warning-modal';
+    modal.id = 'loxten-warning-modal';
     modal.style.cssText = `
       position: fixed !important;
       top: 0 !important;
@@ -493,39 +500,39 @@ class WebGuardianContentScript {
       margin: 20px !important;
     `;
 
-    const riskColor = analysis.riskScore >= 80 ? '#dc3545' : 
-                     analysis.riskScore >= 60 ? '#fd7e14' : '#ffc107';
+    const riskColor = analysis.riskScore >= 80 ? '#dc3545' :
+      analysis.riskScore >= 60 ? '#fd7e14' : '#ffc107';
 
     content.innerHTML = `
       <div style="color: ${riskColor}; font-size: 48px; margin-bottom: 16px;">⚠️</div>
       <h2 style="color: ${riskColor}; margin: 0 0 16px 0; font-size: 24px;">Security Warning</h2>
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #333;"><strong>Risk Score:</strong> ${analysis.riskScore}/100</p>
       <div style="text-align: left; margin: 20px 0; max-height: 200px; overflow-y: auto;">
-        ${analysis.threats.map(threat => 
-          `<div style="margin: 10px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid ${riskColor};">
+        ${analysis.threats.map(threat =>
+      `<div style="margin: 10px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid ${riskColor};">
             <strong style="color: ${riskColor}; text-transform: uppercase; font-size: 12px;">${threat.type.replace(/_/g, ' ')}</strong><br>
             <span style="color: #555; font-size: 14px;">${threat.description}</span>
           </div>`
-        ).join('')}
+    ).join('')}
       </div>
       <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
-        <button id="webguardian-continue" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 14px;">Continue Anyway</button>
-        <button id="webguardian-goback" style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 14px;">Go Back</button>
+        <button id="loxten-continue" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 14px;">Continue Anyway</button>
+        <button id="loxten-goback" style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 14px;">Go Back</button>
       </div>
       <div style="margin-top: 20px; font-size: 12px; color: #666;">
-        Protected by WebGuardian Security Extension
+        Protected by Loxten Security Extension
       </div>
     `;
 
     modal.appendChild(content);
 
     // Event listeners
-    content.querySelector('#webguardian-continue').addEventListener('click', () => {
+    content.querySelector('#loxten-continue').addEventListener('click', () => {
       modal.remove();
       this.warningShown = false;
     });
 
-    content.querySelector('#webguardian-goback').addEventListener('click', () => {
+    content.querySelector('#loxten-goback').addEventListener('click', () => {
       history.back();
     });
 
@@ -553,9 +560,9 @@ class WebGuardianContentScript {
     `;
 
     // Add CSS animation
-    if (!document.getElementById('webguardian-styles')) {
+    if (!document.getElementById('loxten-styles')) {
       const style = document.createElement('style');
-      style.id = 'webguardian-styles';
+      style.id = 'loxten-styles';
       style.textContent = `
         @keyframes slideIn {
           from { transform: translateX(100%); opacity: 0; }
@@ -567,7 +574,7 @@ class WebGuardianContentScript {
 
     notification.innerHTML = `
       <div style="display: flex; align-items: center; gap: 8px;">
-        <strong>WebGuardian</strong>
+        <strong>Loxten</strong>
         <button onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px; margin-left: auto;">×</button>
       </div>
       <div style="margin-top: 5px;">${message}</div>
@@ -585,7 +592,7 @@ class WebGuardianContentScript {
 
   handleTrackerDetection(message) {
     this.trackerCount++;
-    console.log(`WebGuardian blocked tracker: ${message.domain}`);
+    console.log(`Loxten blocked tracker: ${message.domain}`);
   }
 
   highlightSuspiciousElements(elements) {
@@ -594,9 +601,9 @@ class WebGuardianContentScript {
         // Add red border to suspicious elements
         elementInfo.element.style.border = '2px solid red !important';
         elementInfo.element.style.boxShadow = '0 0 10px rgba(255,0,0,0.5) !important';
-        
+
         // Add warning tooltip
-        elementInfo.element.title = `WebGuardian Warning: ${elementInfo.description}`;
+        elementInfo.element.title = `Loxten Warning: ${elementInfo.description}`;
       }
     });
   }
@@ -617,7 +624,100 @@ class WebGuardianContentScript {
     });
 
     // Log for debugging
-    console.log('WebGuardian detected suspicious content:', indicators);
+    console.log('Loxten detected suspicious content:', indicators);
+  }
+
+  /**
+   * Extract structured page data for AI analysis.
+   * Gathers text, forms, scripts, iframes, and meta tags.
+   */
+  extractPageData() {
+    const data = {
+      url: window.location.href,
+      title: document.title || '',
+      text_content: '',
+      forms: [],
+      external_scripts: [],
+      meta_tags: {},
+      has_password_field: false,
+      iframes: []
+    };
+
+    // Extract visible text (truncated to 4000 chars)
+    try {
+      const body = document.body;
+      if (body) {
+        data.text_content = body.innerText.substring(0, 4000);
+      }
+    } catch (e) {}
+
+    // Extract form info
+    try {
+      const forms = document.querySelectorAll('form');
+      forms.forEach(form => {
+        const inputs = Array.from(form.querySelectorAll('input')).map(inp => ({
+          type: inp.type || 'text',
+          name: inp.name || ''
+        }));
+        data.forms.push({
+          action: form.action || '',
+          method: form.method || 'get',
+          inputs: inputs.slice(0, 20)
+        });
+
+        // Check for password fields
+        if (inputs.some(i => i.type === 'password')) {
+          data.has_password_field = true;
+        }
+      });
+    } catch (e) {}
+
+    // Extract external script sources
+    try {
+      const scripts = document.querySelectorAll('script[src]');
+      scripts.forEach(script => {
+        if (script.src) data.external_scripts.push(script.src);
+      });
+      data.external_scripts = data.external_scripts.slice(0, 30);
+    } catch (e) {}
+
+    // Extract meta tags
+    try {
+      const metas = document.querySelectorAll('meta');
+      metas.forEach(meta => {
+        const name = meta.getAttribute('name') || meta.getAttribute('property') || '';
+        const content = meta.getAttribute('content') || '';
+        if (name && content) data.meta_tags[name] = content.substring(0, 200);
+      });
+    } catch (e) {}
+
+    // Extract iframe sources
+    try {
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach(iframe => {
+        if (iframe.src) data.iframes.push(iframe.src);
+      });
+      data.iframes = data.iframes.slice(0, 10);
+    } catch (e) {}
+
+    return data;
+  }
+
+  /**
+   * Send page data to background script for AI analysis
+   */
+  sendPageDataForAI() {
+    try {
+      const pageData = this.extractPageData();
+      chrome.runtime.sendMessage({
+        type: 'page_data_for_ai',
+        data: pageData
+      }).catch(() => {
+        // Extension context might be invalid
+      });
+    } catch (e) {
+      // Silently fail
+    }
   }
 
   cleanup() {
@@ -630,16 +730,16 @@ class WebGuardianContentScript {
 }
 
 // Initialize content script
-let webGuardianContent;
+let loxtenContent;
 try {
-  webGuardianContent = new WebGuardianContentScript();
-  
+  loxtenContent = new LoxtenContentScript();
+
   // Cleanup on page unload
   window.addEventListener('beforeunload', () => {
-    if (webGuardianContent) {
-      webGuardianContent.cleanup();
+    if (loxtenContent) {
+      loxtenContent.cleanup();
     }
   });
 } catch (error) {
-  console.error('WebGuardian content script failed to initialize:', error);
+  console.error('Loxten content script failed to initialize:', error);
 }

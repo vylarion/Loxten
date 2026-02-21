@@ -14,9 +14,9 @@
   :global(body) {
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background: #000000;
-    color: #e2e8f0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #08090a;
+    color: #e4e4e7;
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -25,7 +25,8 @@
 
   main {
     width: 100%;
-    min-height: 100vh;
-    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    padding: 0;
   }
 </style>

@@ -1,4 +1,4 @@
-// Shared type definitions for WebGuardian extension
+// Shared type definitions for Loxten extension
 
 export interface Threat {
   type: string;
@@ -6,6 +6,24 @@ export interface Threat {
   description: string;
   details?: any;
   showDetails?: boolean;
+  ignored?: boolean;
+}
+
+export interface AIAnalysis {
+  risk_score: number;
+  is_safe: boolean;
+  is_phishing: boolean;
+  phishing_confidence: number;
+  impersonating: string | null;
+  ai_summary: string;
+  threats: Array<{
+    type: string;
+    severity: string;
+    description: string;
+    confidence: number;
+  }>;
+  privacy_concerns: string[];
+  cached: boolean;
 }
 
 export interface SecurityData {
@@ -14,6 +32,7 @@ export interface SecurityData {
   threats: Threat[];
   trackersBlocked: number;
   lastScan: Date | null;
+  aiAnalysis?: AIAnalysis;
 }
 
 export interface Settings {
@@ -37,6 +56,18 @@ export interface Stats {
   phishingBlocked: number;
 }
 
+export interface WhitelistEntry {
+  domain: string;
+  addedAt: number;
+}
+
+export interface BreachResult {
+  email: string;
+  breached: boolean;
+  breachCount: number;
+  lastChecked: number;
+}
+
 export interface ChromeResponse {
   riskScore?: number;
   threats?: Threat[];
@@ -45,6 +76,8 @@ export interface ChromeResponse {
 }
 
 export interface ChromeStorageResult {
-  webguardian_settings?: Settings;
-  webguardian_stats?: Stats;
+  loxten_settings?: Settings;
+  loxten_stats?: Stats;
+  loxten_whitelist?: WhitelistEntry[];
+  loxten_breach?: BreachResult;
 }
