@@ -1,11 +1,6 @@
 // Background service worker for Loxten Chrome Extension
 class LoxtenBackground {
   constructor() {
-    // Loxten API backend URL
-    this.API_BASE_URL = 'http://localhost:8000';
-    this.apiCache = new Map(); // URL -> { result, timestamp }
-    this.API_CACHE_TTL = 300000; // 5 minutes
-
     this.settings = {
       realTimeProtection: true,
       blockMaliciousSites: true,
@@ -119,118 +114,12 @@ class LoxtenBackground {
       return true; // Keep message channel open for async responses
     });
 
-    // Handle tab updates — trigger AI analysis
+    // Handle tab updates
     chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (changeInfo.status === 'complete' && tab.url) {
         this.updateBadge(tabId);
       }
     });
-  }
-
-  /**
-   * Call the Loxten FastAPI backend for AI-powered analysis.
-   * Falls back gracefully if backend is unreachable.
-   */
-  async callLoxtenAPI(pageData, tabId) {
-    const url = pageData.url;
-
-    // Check cache
-    const cached = this.apiCache.get(url);
-    if (cached && (Date.now() - cached.timestamp) < this.API_CACHE_TTL) {
-      console.log('Loxten AI: using cached result for', url);
-      await this.mergeAIResults(tabId, cached.result);
-      return cached.result;
-    }
-
-    try {
-      const response = await fetch(`${this.API_BASE_URL}/api/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pageData),
-        signal: AbortSignal.timeout(15000) // 15s timeout
-      });
-
-      if (!response.ok) {
-        console.warn('Loxten API returned', response.status);
-        return null;
-      }
-
-      const result = await response.json();
-
-      // Cache the result
-      this.apiCache.set(url, { result, timestamp: Date.now() });
-
-      // Merge AI results into the stored analysis
-      await this.mergeAIResults(tabId, result);
-
-      // Show warning if AI detects high risk
-      if (result.risk_score >= 60 && this.settings.showWarnings) {
-        this.showSecurityWarning(tabId, {
-          url: url,
-          riskScore: result.risk_score,
-          threats: result.threats || [],
-          aiSummary: result.ai_summary
-        });
-      }
-
-      // Update badge
-      if (result.threats && result.threats.length > 0) {
-        this.updateBadge(tabId, {
-          threats: result.threats,
-          riskScore: result.risk_score
-        });
-      }
-
-      console.log('Loxten AI analysis complete:', url, 'risk:', result.risk_score);
-      return result;
-
-    } catch (error) {
-      // Backend unreachable — fail silently, local analysis still works
-      console.log('Loxten API unreachable, using local analysis only:', error.message);
-      return null;
-    }
-  }
-
-  /**
-   * Merge AI analysis results into the stored tab analysis
-   */
-  async mergeAIResults(tabId, aiResult) {
-    if (!tabId || !aiResult) return;
-
-    const key = `analysis_${tabId}`;
-    try {
-      const stored = await chrome.storage.local.get(key);
-      const existing = stored[key] || {
-        url: aiResult.url,
-        domain: '',
-        threats: [],
-        riskScore: 0,
-        trackersBlocked: 0,
-        timestamp: Date.now(),
-        isSecure: true
-      };
-
-      // Merge AI threats with local threats (avoid duplicates by type)
-      const existingTypes = new Set(existing.threats.map(t => t.type));
-      const newThreats = (aiResult.threats || []).filter(t => !existingTypes.has(t.type));
-      existing.threats = [...existing.threats, ...newThreats];
-
-      // Take the higher risk score
-      existing.riskScore = Math.max(existing.riskScore, aiResult.risk_score || 0);
-      existing.isSecure = existing.riskScore < 30;
-
-      // Store AI-specific fields
-      existing.aiSummary = aiResult.ai_summary || '';
-      existing.aiAnalyzed = true;
-      existing.isPhishing = aiResult.is_phishing || false;
-      existing.phishingConfidence = aiResult.phishing_confidence || 0;
-      existing.privacyConcerns = aiResult.privacy_concerns || [];
-      existing.impersonating = aiResult.impersonating || null;
-
-      await chrome.storage.local.set({ [key]: existing });
-    } catch (error) {
-      console.error('Failed to merge AI results:', error);
-    }
   }
 
   async analyzeURL(url, tabId) {
@@ -518,23 +407,6 @@ class LoxtenBackground {
           // Handle suspicious content reports from content script
           console.log('Suspicious content reported:', message.data);
           sendResponse({ success: true });
-          break;
-
-        case 'page_data_for_ai':
-          // Content script sent page data — call backend AI
-          if (message.data && sender.tab?.id) {
-            this.callLoxtenAPI(message.data, sender.tab.id)
-              .then(result => console.log('AI analysis received for tab', sender.tab.id))
-              .catch(err => console.log('AI analysis skipped:', err.message));
-          }
-          sendResponse({ success: true });
-          break;
-
-        case 'get_ai_analysis':
-          // Popup requesting AI analysis data
-          const aiKey = `analysis_${sender.tab?.id}`;
-          const aiResult = await chrome.storage.local.get(aiKey);
-          sendResponse(aiResult[aiKey] || null);
           break;
 
         case 'update_tracker_count':

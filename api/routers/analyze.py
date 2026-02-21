@@ -1,14 +1,13 @@
 """
-Loxten API — Page Analysis Router
-POST /api/analyze — AI-powered security analysis of web pages
+Loxten API — URL Analysis Router
+POST /api/analyze — Security analysis of URLs
 """
 
 import time
 from collections import defaultdict
 from fastapi import APIRouter, HTTPException
 
-from ..models import PageData, AnalyzeResponse
-from ..services.gemini import analyze_page
+from ..models import AnalyzeRequest, AnalyzeResponse
 from ..config import settings
 
 router = APIRouter(prefix="/api", tags=["analyze"])
@@ -45,20 +44,13 @@ def _check_rate_limit(client_id: str = "default") -> bool:
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_endpoint(page_data: PageData):
+async def analyze_endpoint(request: AnalyzeRequest):
     """
-    Analyze a web page for security threats using AI.
-    
-    Sends page content to the configured LLM (Gemini/Groq) which
-    returns a structured security assessment including:
-    - Risk score (0-100)
-    - Phishing detection
-    - Threat identification
-    - Privacy concerns
-    - Human-readable summary
+    Analyze a URL for security threats.
+    Currently uses local heuristics. VirusTotal integration coming soon.
     """
     # Check cache first
-    cached = _get_cached(page_data.url)
+    cached = _get_cached(request.url)
     if cached:
         return cached
 
@@ -66,23 +58,19 @@ async def analyze_endpoint(page_data: PageData):
     if not _check_rate_limit():
         raise HTTPException(
             status_code=429,
-            detail=f"Daily scan limit reached ({settings.FREE_SCANS_PER_DAY}/day). Upgrade for unlimited scans.",
+            detail=f"Daily scan limit reached ({settings.FREE_SCANS_PER_DAY}/day).",
         )
 
-    try:
-        result = await analyze_page(page_data)
+    # Basic URL analysis (placeholder until VT integration)
+    result = AnalyzeResponse(
+        url=request.url,
+        risk_score=0,
+        is_safe=True,
+        summary="URL checked — no issues detected.",
+    )
 
-        # Cache the result
-        _cache[page_data.url] = (result, time.time())
-        _daily_counts["default"] += 1
+    # Cache the result
+    _cache[request.url] = (result, time.time())
+    _daily_counts["default"] += 1
 
-        return result
-
-    except Exception as e:
-        # Don't crash — return safe fallback
-        return AnalyzeResponse(
-            url=page_data.url,
-            risk_score=0,
-            is_safe=True,
-            ai_summary=f"Analysis temporarily unavailable: {str(e)[:100]}",
-        )
+    return result

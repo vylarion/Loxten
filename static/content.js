@@ -44,9 +44,6 @@ class LoxtenContentScript {
       this.detectClickjacking();
       this.checkForCryptomining();
 
-      // Send page data to background for AI analysis after a short delay
-      setTimeout(() => this.sendPageDataForAI(), 2000);
-
       console.log('Loxten content script initialized on:', window.location.hostname);
     } catch (error) {
       console.error('Loxten content script error:', error);
@@ -66,10 +63,6 @@ class LoxtenContentScript {
           case 'suspicious_elements':
             this.highlightSuspiciousElements(message.elements);
             break;
-          case 'extract_page_data':
-            const pageData = this.extractPageData();
-            sendResponse(pageData);
-            return true;
         }
         sendResponse({ success: true });
       } catch (error) {
@@ -625,99 +618,6 @@ class LoxtenContentScript {
 
     // Log for debugging
     console.log('Loxten detected suspicious content:', indicators);
-  }
-
-  /**
-   * Extract structured page data for AI analysis.
-   * Gathers text, forms, scripts, iframes, and meta tags.
-   */
-  extractPageData() {
-    const data = {
-      url: window.location.href,
-      title: document.title || '',
-      text_content: '',
-      forms: [],
-      external_scripts: [],
-      meta_tags: {},
-      has_password_field: false,
-      iframes: []
-    };
-
-    // Extract visible text (truncated to 4000 chars)
-    try {
-      const body = document.body;
-      if (body) {
-        data.text_content = body.innerText.substring(0, 4000);
-      }
-    } catch (e) {}
-
-    // Extract form info
-    try {
-      const forms = document.querySelectorAll('form');
-      forms.forEach(form => {
-        const inputs = Array.from(form.querySelectorAll('input')).map(inp => ({
-          type: inp.type || 'text',
-          name: inp.name || ''
-        }));
-        data.forms.push({
-          action: form.action || '',
-          method: form.method || 'get',
-          inputs: inputs.slice(0, 20)
-        });
-
-        // Check for password fields
-        if (inputs.some(i => i.type === 'password')) {
-          data.has_password_field = true;
-        }
-      });
-    } catch (e) {}
-
-    // Extract external script sources
-    try {
-      const scripts = document.querySelectorAll('script[src]');
-      scripts.forEach(script => {
-        if (script.src) data.external_scripts.push(script.src);
-      });
-      data.external_scripts = data.external_scripts.slice(0, 30);
-    } catch (e) {}
-
-    // Extract meta tags
-    try {
-      const metas = document.querySelectorAll('meta');
-      metas.forEach(meta => {
-        const name = meta.getAttribute('name') || meta.getAttribute('property') || '';
-        const content = meta.getAttribute('content') || '';
-        if (name && content) data.meta_tags[name] = content.substring(0, 200);
-      });
-    } catch (e) {}
-
-    // Extract iframe sources
-    try {
-      const iframes = document.querySelectorAll('iframe');
-      iframes.forEach(iframe => {
-        if (iframe.src) data.iframes.push(iframe.src);
-      });
-      data.iframes = data.iframes.slice(0, 10);
-    } catch (e) {}
-
-    return data;
-  }
-
-  /**
-   * Send page data to background script for AI analysis
-   */
-  sendPageDataForAI() {
-    try {
-      const pageData = this.extractPageData();
-      chrome.runtime.sendMessage({
-        type: 'page_data_for_ai',
-        data: pageData
-      }).catch(() => {
-        // Extension context might be invalid
-      });
-    } catch (e) {
-      // Silently fail
-    }
   }
 
   cleanup() {

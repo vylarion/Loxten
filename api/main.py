@@ -15,7 +15,6 @@ from .routers import analyze, breach, health
 async def lifespan(app: FastAPI):
     """Startup/shutdown events"""
     print(f"🛡️  Loxten API v{settings.VERSION} starting...")
-    print(f"   LLM Provider: {settings.LLM_PROVIDER}")
     print(f"   Free scans/day: {settings.FREE_SCANS_PER_DAY}")
     print(f"   Debug: {settings.DEBUG}")
     yield
@@ -25,7 +24,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
-    description="AI-powered web security analysis API for the Loxten browser extension",
+    description="Web security analysis API for the Loxten browser extension",
     lifespan=lifespan,
 )
 

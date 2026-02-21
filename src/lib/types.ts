@@ -9,30 +9,12 @@ export interface Threat {
   ignored?: boolean;
 }
 
-export interface AIAnalysis {
-  risk_score: number;
-  is_safe: boolean;
-  is_phishing: boolean;
-  phishing_confidence: number;
-  impersonating: string | null;
-  ai_summary: string;
-  threats: Array<{
-    type: string;
-    severity: string;
-    description: string;
-    confidence: number;
-  }>;
-  privacy_concerns: string[];
-  cached: boolean;
-}
-
 export interface SecurityData {
   isSecure: boolean;
   riskScore: number;
   threats: Threat[];
   trackersBlocked: number;
   lastScan: Date | null;
-  aiAnalysis?: AIAnalysis;
 }
 
 export interface Settings {

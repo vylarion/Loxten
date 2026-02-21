@@ -9,37 +9,25 @@ from typing import Optional
 
 # ─── Analyze Endpoint ───
 
-class PageData(BaseModel):
-    """Data extracted from a web page by the content script"""
-    url: str = Field(..., description="Full URL of the page")
-    title: str = Field("", description="Page title")
-    text_content: str = Field("", description="Visible text content (truncated)")
-    forms: list[dict] = Field(default_factory=list, description="Form actions and input types found on page")
-    external_scripts: list[str] = Field(default_factory=list, description="External script source URLs")
-    meta_tags: dict = Field(default_factory=dict, description="Meta tag key-value pairs")
-    has_password_field: bool = Field(False, description="Whether page has a password input")
-    iframes: list[str] = Field(default_factory=list, description="Iframe source URLs")
+class AnalyzeRequest(BaseModel):
+    """URL to check"""
+    url: str = Field(..., description="Full URL to analyze")
 
 
 class ThreatItem(BaseModel):
-    """A single threat identified by AI analysis"""
+    """A single threat identified"""
     type: str = Field(..., description="Threat type: phishing, malware, tracker, etc.")
     severity: str = Field("medium", description="low, medium, high, critical")
     description: str = Field(..., description="Human-readable description")
-    confidence: float = Field(0.0, description="AI confidence 0.0 to 1.0")
 
 
 class AnalyzeResponse(BaseModel):
-    """Response from AI-powered page analysis"""
+    """Response from page analysis"""
     url: str
     risk_score: int = Field(0, ge=0, le=100, description="Overall risk 0-100")
     is_safe: bool = Field(True)
     threats: list[ThreatItem] = Field(default_factory=list)
-    ai_summary: str = Field("", description="AI-generated security summary")
-    privacy_concerns: list[str] = Field(default_factory=list, description="Privacy issues found")
-    is_phishing: bool = Field(False)
-    phishing_confidence: float = Field(0.0)
-    impersonating: Optional[str] = Field(None, description="Brand being impersonated, if phishing")
+    summary: str = Field("", description="Security summary")
     cached: bool = Field(False, description="Whether this result was from cache")
 
 
@@ -69,6 +57,4 @@ class BreachResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "1.0.0"
-    llm_provider: str = ""
-    llm_connected: bool = False
+    version: str = "2.0.0"
