@@ -14,11 +14,18 @@ from .routers import analyze, breach, health
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events"""
-    print(f"🛡️  Loxten API v{settings.VERSION} starting...")
-    print(f"   Free scans/day: {settings.FREE_SCANS_PER_DAY}")
-    print(f"   Debug: {settings.DEBUG}")
+    try:
+        print(f"[*] Loxten API v{settings.VERSION} starting...")
+        print(f"    Free scans/day: {settings.FREE_SCANS_PER_DAY}")
+        print(f"    Debug: {settings.DEBUG}")
+        vt_status = "[OK] key set" if settings.VIRUSTOTAL_API_KEY else "[--] no key"
+        gsb_status = "[OK] key set" if settings.GOOGLE_SAFE_BROWSING_API_KEY else "[--] no key"
+        print(f"    VirusTotal:      {vt_status}")
+        print(f"    Safe Browsing:   {gsb_status}")
+    except Exception as e:
+        print(f"Startup log error: {e}")
     yield
-    print("🛡️  Loxten API shutting down...")
+    print("[*] Loxten API shutting down...")
 
 
 app = FastAPI(

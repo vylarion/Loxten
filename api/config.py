@@ -29,6 +29,10 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
+    # --- External API Keys (optional) ---
+    VIRUSTOTAL_API_KEY: str = os.getenv("VIRUSTOTAL_API_KEY", "")
+    GOOGLE_SAFE_BROWSING_API_KEY: str = os.getenv("GOOGLE_SAFE_BROWSING_API_KEY", "")
+
     # --- API Info ---
     APP_NAME: str = "Loxten API"
     VERSION: str = "2.0.0"

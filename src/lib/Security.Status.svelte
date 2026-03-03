@@ -7,33 +7,14 @@
 		MagnifyingGlass,
 		FishSimple,
 		Eye,
-		ArrowsClockwise,
 		CheckCircle,
 		XCircle,
-		Globe,
-		Certificate,
-		Link as LinkIcon,
-		Clock,
-		Info
+		ShieldCheck
 	} from 'phosphor-svelte';
 
 	export let securityData: SecurityData;
-	export let runQuickScan: () => Promise<void>;
 	export let currentUrl: string = '';
 	export let isHttps: boolean = false;
-
-	let isScanning = false;
-
-	async function handleScan(): Promise<void> {
-		isScanning = true;
-		try {
-			await runQuickScan();
-		} catch (error) {
-			console.error('Scan failed:', error);
-		} finally {
-			isScanning = false;
-		}
-	}
 
 	function getGrade(riskScore: number): string {
 		if (riskScore < 20) return 'A+';
@@ -44,44 +25,11 @@
 		return 'F';
 	}
 
-	function getDomain(): string {
-		try {
-			return new URL(currentUrl).hostname;
-		} catch {
-			return '—';
-		}
-	}
-
-	function getProtocol(): string {
-		try {
-			const url = new URL(currentUrl);
-			return url.protocol.replace(':', '').toUpperCase();
-		} catch {
-			return '—';
-		}
-	}
-
-	function getPort(): string {
-		try {
-			const url = new URL(currentUrl);
-			return url.port || (isHttps ? '443' : '80');
-		} catch {
-			return '—';
-		}
-	}
-
-	function getPathname(): string {
-		try {
-			const url = new URL(currentUrl);
-			return url.pathname === '/' ? '/' : url.pathname;
-		} catch {
-			return '—';
-		}
-	}
-
 	$: grade = getGrade(securityData.riskScore);
 	$: safeScore = 100 - securityData.riskScore;
 	$: dashOffset = 251.2 - (251.2 * safeScore) / 100;
+	$: vtAvailable = (securityData.sourcesChecked || []).includes('virustotal');
+	$: gsbAvailable = (securityData.sourcesChecked || []).includes('safebrowsing');
 </script>
 
 <div class="status">
@@ -147,7 +95,15 @@
 			<div class="analysis-row">
 				<div class="analysis-icon"><MagnifyingGlass size={12} weight="bold" /></div>
 				<span class="analysis-name">Malware</span>
-				<span class="analysis-val">{securityData.riskScore < 30 ? 'Clean' : 'Issues'}</span>
+				<span class="analysis-val">
+					{#if vtAvailable && (securityData.vtDetections || 0) > 0}
+						{securityData.vtDetections}/{securityData.vtTotalEngines} flagged
+					{:else if securityData.riskScore < 30}
+						Clean
+					{:else}
+						Issues
+					{/if}
+				</span>
 			</div>
 			<div class="analysis-row">
 				<div class="analysis-icon"><FishSimple size={12} weight="bold" /></div>
@@ -163,66 +119,19 @@
 					{securityData.trackersBlocked > 0 ? `${securityData.trackersBlocked} blocked` : 'None'}
 				</span>
 			</div>
-		</div>
-	</div>
-
-	<!-- Scan + Site Details row -->
-	<div class="bottom-row">
-		<button
-			class="scan-btn"
-			class:scanning={isScanning}
-			on:click={handleScan}
-			disabled={isScanning}
-		>
-			{#if isScanning}
-				<div class="btn-spin"></div>
-				Scanning...
-			{:else}
-				<ArrowsClockwise size={13} weight="bold" />
-				Run Scan
-			{/if}
-		</button>
-
-		<!-- Site Details - pure CSS hover -->
-		<div class="details-trigger-wrap">
-			<button class="details-trigger" type="button">
-				<Info size={13} weight="bold" />
-			</button>
-			<div class="details-tooltip">
-				<h4 class="details-title">Site Details</h4>
-				<div class="details-grid">
-					<div class="detail-row">
-						<div class="detail-icon"><Globe size={10} weight="bold" /></div>
-						<span class="detail-key">Domain</span>
-						<span class="detail-val">{getDomain()}</span>
-					</div>
-					<div class="detail-row">
-						<div class="detail-icon"><LockSimple size={10} weight="bold" /></div>
-						<span class="detail-key">Connection</span>
-						<span class="detail-val">{isHttps ? 'Encrypted (TLS)' : 'Not Encrypted'}</span>
-					</div>
-					<div class="detail-row">
-						<div class="detail-icon"><LinkIcon size={10} weight="bold" /></div>
-						<span class="detail-key">Protocol</span>
-						<span class="detail-val">{getProtocol()}</span>
-					</div>
-					<div class="detail-row">
-						<div class="detail-icon"><Certificate size={10} weight="bold" /></div>
-						<span class="detail-key">Certificate</span>
-						<span class="detail-val">{isHttps ? 'Valid' : 'N/A'}</span>
-					</div>
-					<div class="detail-row">
-						<div class="detail-icon"><Clock size={10} weight="bold" /></div>
-						<span class="detail-key">Port</span>
-						<span class="detail-val">{getPort()}</span>
-					</div>
-					<div class="detail-row">
-						<div class="detail-icon"><LinkIcon size={10} weight="bold" /></div>
-						<span class="detail-key">Path</span>
-						<span class="detail-val path">{getPathname()}</span>
-					</div>
+			{#if gsbAvailable}
+				<div class="analysis-row">
+					<div class="analysis-icon"><ShieldCheck size={12} weight="bold" /></div>
+					<span class="analysis-name">Safe Browsing</span>
+					<span class="analysis-val">
+						{#if securityData.gsbThreats && securityData.gsbThreats.length > 0}
+							{securityData.gsbThreats.length} flag{securityData.gsbThreats.length !== 1 ? 's' : ''}
+						{:else}
+							Clear
+						{/if}
+					</span>
 				</div>
-			</div>
+			{/if}
 		</div>
 	</div>
 </div>
@@ -414,176 +323,5 @@
 		font-size: 11px;
 		font-weight: 600;
 		color: #909090;
-	}
-
-	/* Bottom row */
-	.bottom-row {
-		display: flex;
-		gap: 8px;
-	}
-
-	.scan-btn {
-		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		padding: 10px;
-		border: 1px solid var(--border-color, #181818);
-		border-radius: 3px;
-		background: #0e0e0e;
-		color: #a0a0a0;
-		font-size: 12px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.15s ease;
-		font-family: inherit;
-	}
-
-	.scan-btn:hover:not(:disabled) {
-		background: #181818;
-		color: #d0d0d0;
-		border-color: #252525;
-	}
-
-	.scan-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.scan-btn.scanning {
-		color: #707070;
-	}
-
-	.btn-spin {
-		width: 12px;
-		height: 12px;
-		border: 2px solid #252525;
-		border-top-color: #808080;
-		border-radius: 50%;
-		animation: spin 0.7s linear infinite;
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-
-	/* Site Details — pure CSS hover */
-	.details-trigger-wrap {
-		position: relative;
-	}
-
-	.details-trigger {
-		width: 36px;
-		height: 36px;
-		border: 1px solid var(--border-color, #181818);
-		border-radius: 3px;
-		background: #0e0e0e;
-		color: #808080;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		transition: all 0.15s ease;
-	}
-
-	.details-trigger:hover {
-		background: #181818;
-		color: #c0c0c0;
-		border-color: #252525;
-	}
-
-	/* Tooltip: always in DOM, hidden by default, shown on hover via CSS */
-	.details-tooltip {
-		position: absolute;
-		bottom: calc(100% + 4px);
-		right: 0;
-		width: 260px;
-		background: #0c0c0c;
-		border: 1px solid #222;
-		border-radius: 3px;
-		padding: 12px 14px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-		z-index: 100;
-		opacity: 0;
-		visibility: hidden;
-		transform: translateY(4px);
-		transition:
-			opacity 0.15s ease,
-			transform 0.15s ease,
-			visibility 0.15s ease;
-		pointer-events: none;
-	}
-
-	/* Show on hover of the entire wrap (button + tooltip area) */
-	.details-trigger-wrap:hover .details-tooltip {
-		opacity: 1;
-		visibility: visible;
-		transform: translateY(0);
-		pointer-events: auto;
-	}
-
-	.details-title {
-		margin: 0 0 8px;
-		font-size: 9px;
-		font-weight: 600;
-		color: #707070;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-
-	.details-grid {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.detail-row {
-		display: flex;
-		align-items: center;
-		gap: 7px;
-		padding: 5px 0;
-		border-bottom: 1px solid #151515;
-	}
-
-	.detail-row:last-child {
-		border-bottom: none;
-	}
-
-	.detail-icon {
-		width: 20px;
-		height: 20px;
-		border-radius: 2px;
-		background: #131313;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: #505050;
-		flex-shrink: 0;
-	}
-
-	.detail-key {
-		flex: 1;
-		font-size: 10px;
-		font-weight: 500;
-		color: #808080;
-	}
-
-	.detail-val {
-		font-size: 10px;
-		font-weight: 600;
-		color: #a0a0a0;
-		max-width: 120px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		text-align: right;
-	}
-
-	.detail-val.path {
-		font-family: 'JetBrains Mono', 'Fira Code', monospace;
-		font-size: 9px;
-		color: #808080;
 	}
 </style>

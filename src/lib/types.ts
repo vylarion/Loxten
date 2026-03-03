@@ -15,6 +15,11 @@ export interface SecurityData {
   threats: Threat[];
   trackersBlocked: number;
   lastScan: Date | null;
+  vtDetections?: number;
+  vtTotalEngines?: number;
+  vtReputation?: number;
+  gsbThreats?: string[];
+  sourcesChecked?: string[];
 }
 
 export interface Settings {
@@ -55,6 +60,11 @@ export interface ChromeResponse {
   threats?: Threat[];
   trackersBlocked?: number;
   timestamp?: number;
+  vtDetections?: number;
+  vtTotalEngines?: number;
+  vtReputation?: number;
+  gsbThreats?: string[];
+  sourcesChecked?: string[];
 }
 
 export interface ChromeStorageResult {

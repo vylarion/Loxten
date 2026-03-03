@@ -30,6 +30,13 @@ class AnalyzeResponse(BaseModel):
     summary: str = Field("", description="Security summary")
     cached: bool = Field(False, description="Whether this result was from cache")
 
+    # ─── VT / GSB enrichment ───
+    vt_detections: int = Field(0, description="Number of VT engines that flagged the URL")
+    vt_total_engines: int = Field(0, description="Total VT engines that scanned the URL")
+    vt_reputation: int = Field(0, description="VT community reputation score")
+    gsb_threats: list[str] = Field(default_factory=list, description="Google Safe Browsing threat types")
+    sources_checked: list[str] = Field(default_factory=list, description="Which sources ran (heuristics, virustotal, safebrowsing)")
+
 
 # ─── Breach Endpoint ───
 
@@ -58,3 +65,5 @@ class BreachResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "2.0.0"
+    virustotal: str = Field("disabled", description="VT service status")
+    safebrowsing: str = Field("disabled", description="GSB service status")

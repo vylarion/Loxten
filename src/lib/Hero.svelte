@@ -6,9 +6,12 @@
 		Warning,
 		GearSix,
 		LockSimple,
-		LockSimpleOpen
+		LockSimpleOpen,
+		Info,
+		X
 	} from 'phosphor-svelte';
 	import SecurityStatus from './Security.Status.svelte';
+	import SiteDetails from './SiteDetails.svelte';
 	import ThreatsList from './ThreatsList.svelte';
 	import Settings from './Settings.svelte';
 	import type { Threat, SecurityData, ChromeResponse, ChromeStorageResult } from './types';
@@ -22,7 +25,8 @@
 		trackersBlocked: 0,
 		lastScan: null
 	};
-	let activeTab: 'security' | 'threats' | 'settings' = 'security';
+	let activeTab: 'security' | 'details' | 'threats' = 'security';
+	let settingsOpen: boolean = false;
 	let isLoading: boolean = true;
 	let extensionError: boolean = false;
 	let protectionEnabled: boolean = true;
@@ -52,7 +56,10 @@
 						}
 					],
 					trackersBlocked: 5,
-					lastScan: new Date()
+					lastScan: new Date(),
+					vtDetections: 0,
+					vtTotalEngines: 72,
+					sourcesChecked: ['heuristics', 'virustotal']
 				};
 				isLoading = false;
 			}
@@ -93,7 +100,12 @@
 						riskScore: response.riskScore || 0,
 						threats: response.threats || [],
 						trackersBlocked: response.trackersBlocked || 0,
-						lastScan: response.timestamp ? new Date(response.timestamp) : new Date()
+						lastScan: response.timestamp ? new Date(response.timestamp) : new Date(),
+						vtDetections: response.vtDetections || 0,
+						vtTotalEngines: response.vtTotalEngines || 0,
+						vtReputation: response.vtReputation || 0,
+						gsbThreats: response.gsbThreats || [],
+						sourcesChecked: response.sourcesChecked || ['heuristics']
 					};
 				}
 			}
@@ -121,28 +133,6 @@
 		protectionEnabled = e.detail.enabled;
 	}
 
-	async function runQuickScan(): Promise<void> {
-		isLoading = true;
-		try {
-			if (chrome?.runtime?.sendMessage) {
-				await chrome.runtime.sendMessage({
-					type: 'force_scan',
-					url: currentUrl
-				});
-				await loadSecurityAnalysis();
-			} else {
-				setTimeout(() => {
-					securityData.riskScore = Math.floor(Math.random() * 100);
-					securityData.lastScan = new Date();
-					isLoading = false;
-				}, 1000);
-			}
-		} catch (error) {
-			console.error('Failed to run scan:', error);
-			isLoading = false;
-		}
-	}
-
 	function formatUrl(url: string): string {
 		try {
 			const urlObj = new URL(url);
@@ -152,8 +142,12 @@
 		}
 	}
 
-	function setActiveTab(tab: 'security' | 'threats' | 'settings'): void {
+	function setActiveTab(tab: 'security' | 'details' | 'threats'): void {
 		activeTab = tab;
+	}
+
+	function toggleSettings(): void {
+		settingsOpen = !settingsOpen;
 	}
 
 	$: borderColor = protectionEnabled ? '#1a7a2e' : '#7a1a1a';
@@ -175,17 +169,27 @@
 			</div>
 			<span class="brand-name">Loxten</span>
 		</div>
-		<div class="url-chip">
-			<span class="url-lock" class:secure={isHttps}>
-				{#if isHttps}
-					<LockSimple size={10} weight="bold" />
-				{:else}
-					<LockSimpleOpen size={10} weight="bold" />
-				{/if}
-			</span>
-			<span class="url-text" title={currentUrl}>
-				{formatUrl(currentUrl)}
-			</span>
+		<div class="header-right">
+			<div class="url-chip">
+				<span class="url-lock" class:secure={isHttps}>
+					{#if isHttps}
+						<LockSimple size={10} weight="bold" />
+					{:else}
+						<LockSimpleOpen size={10} weight="bold" />
+					{/if}
+				</span>
+				<span class="url-text" title={currentUrl}>
+					{formatUrl(currentUrl)}
+				</span>
+			</div>
+			<button
+				class="gear-btn"
+				class:active={settingsOpen}
+				on:click={toggleSettings}
+				title="Settings"
+			>
+				<GearSix size={15} weight={settingsOpen ? 'fill' : 'bold'} />
+			</button>
 		</div>
 	</header>
 
@@ -209,6 +213,14 @@
 				</button>
 				<button
 					class="tab"
+					class:active={activeTab === 'details'}
+					on:click={() => setActiveTab('details')}
+				>
+					<Info size={13} weight={activeTab === 'details' ? 'fill' : 'regular'} />
+					Site Details
+				</button>
+				<button
+					class="tab"
 					class:active={activeTab === 'threats'}
 					on:click={() => setActiveTab('threats')}
 				>
@@ -218,28 +230,37 @@
 						<span class="tab-badge">{securityData.threats.length}</span>
 					{/if}
 				</button>
-				<button
-					class="tab"
-					class:active={activeTab === 'settings'}
-					on:click={() => setActiveTab('settings')}
-				>
-					<GearSix size={13} weight={activeTab === 'settings' ? 'fill' : 'regular'} />
-					Settings
-				</button>
 			</nav>
 
 			<!-- Tab content -->
 			<div class="tab-panel">
 				{#if activeTab === 'security'}
-					<SecurityStatus {securityData} {runQuickScan} {currentUrl} {isHttps} />
+					<SecurityStatus {securityData} {currentUrl} {isHttps} />
+				{:else if activeTab === 'details'}
+					<SiteDetails {currentUrl} {isHttps} {securityData} />
 				{:else if activeTab === 'threats'}
 					<ThreatsList threats={securityData.threats} />
-				{:else if activeTab === 'settings'}
-					<Settings />
 				{/if}
 			</div>
 		{/if}
 	</div>
+
+	<!-- Settings sidebar overlay -->
+	{#if settingsOpen}
+		<!-- svelte-ignore a11y-click-events-have-key-events -->
+		<div class="settings-overlay" on:click={toggleSettings}></div>
+		<aside class="settings-sidebar">
+			<div class="sidebar-header">
+				<h3 class="sidebar-title">Settings</h3>
+				<button class="sidebar-close" on:click={toggleSettings}>
+					<X size={14} weight="bold" />
+				</button>
+			</div>
+			<div class="sidebar-content">
+				<Settings />
+			</div>
+		</aside>
+	{/if}
 
 	<!-- Footer -->
 	<footer class="footer">
@@ -265,6 +286,7 @@
 		display: flex;
 		flex-direction: column;
 		overflow: visible;
+		position: relative;
 	}
 
 	/* Dev bar */
@@ -324,6 +346,12 @@
 		letter-spacing: -0.02em;
 	}
 
+	.header-right {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
 	.url-chip {
 		display: flex;
 		align-items: center;
@@ -334,7 +362,7 @@
 		border: 1px solid var(--border-color, #181818);
 		font-size: 11px;
 		color: #808080;
-		max-width: 170px;
+		max-width: 140px;
 		overflow: hidden;
 	}
 
@@ -353,6 +381,33 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.gear-btn {
+		width: 30px;
+		height: 30px;
+		border: 1px solid var(--border-color, #181818);
+		border-radius: 3px;
+		background: #0e0e0e;
+		color: #707070;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: all 0.15s ease;
+		flex-shrink: 0;
+	}
+
+	.gear-btn:hover {
+		background: #181818;
+		color: #b0b0b0;
+		border-color: #252525;
+	}
+
+	.gear-btn.active {
+		background: #181818;
+		color: #d4d4d4;
+		border-color: #303030;
 	}
 
 	/* Content area */
@@ -465,6 +520,90 @@
 	}
 
 	.tab-panel::-webkit-scrollbar-thumb {
+		background: #1e1e1e;
+		border-radius: 2px;
+	}
+
+	/* Settings sidebar overlay */
+	.settings-overlay {
+		position: absolute;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 90;
+	}
+
+	.settings-sidebar {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		width: 300px;
+		background: #090909;
+		border-left: 1px solid #1a1a1a;
+		z-index: 100;
+		display: flex;
+		flex-direction: column;
+		animation: slideIn 0.2s ease-out;
+	}
+
+	@keyframes slideIn {
+		from {
+			transform: translateX(100%);
+		}
+		to {
+			transform: translateX(0);
+		}
+	}
+
+	.sidebar-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 16px 18px;
+		border-bottom: 1px solid #141414;
+	}
+
+	.sidebar-title {
+		margin: 0;
+		font-size: 14px;
+		font-weight: 700;
+		color: #d8d8d8;
+	}
+
+	.sidebar-close {
+		width: 26px;
+		height: 26px;
+		border: 1px solid #1e1e1e;
+		border-radius: 3px;
+		background: #0e0e0e;
+		color: #808080;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.sidebar-close:hover {
+		background: #1a1a1a;
+		color: #d0d0d0;
+	}
+
+	.sidebar-content {
+		flex: 1;
+		overflow-y: auto;
+		padding: 12px;
+	}
+
+	.sidebar-content::-webkit-scrollbar {
+		width: 3px;
+	}
+
+	.sidebar-content::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	.sidebar-content::-webkit-scrollbar-thumb {
 		background: #1e1e1e;
 		border-radius: 2px;
 	}

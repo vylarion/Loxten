@@ -1,4 +1,6 @@
 // Background service worker for Loxten Chrome Extension
+const API_BASE_URL = 'http://localhost:8000';
+
 class LoxtenBackground {
   constructor() {
     this.settings = {
@@ -180,6 +182,25 @@ class LoxtenBackground {
         analysis.riskScore += urlCheck.score;
       }
 
+      // ─── Backend enrichment (VT + GSB) ───
+      const backendResult = await this.checkBackend(url);
+      if (backendResult) {
+        // Merge backend threats
+        if (backendResult.threats && backendResult.threats.length > 0) {
+          for (const t of backendResult.threats) {
+            analysis.threats.push(t);
+          }
+        }
+        // Use the higher risk score
+        analysis.riskScore = Math.min(Math.max(analysis.riskScore, backendResult.risk_score || 0), 100);
+        // Attach VT/GSB metadata
+        analysis.vtDetections = backendResult.vt_detections || 0;
+        analysis.vtTotalEngines = backendResult.vt_total_engines || 0;
+        analysis.vtReputation = backendResult.vt_reputation || 0;
+        analysis.gsbThreats = backendResult.gsb_threats || [];
+        analysis.sourcesChecked = backendResult.sources_checked || ['heuristics'];
+      }
+
       // Determine if site is secure
       analysis.isSecure = analysis.riskScore < 30;
 
@@ -296,6 +317,35 @@ class LoxtenBackground {
     }
 
     return result;
+  }
+
+  async checkBackend(url) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+      const resp = await fetch(`${API_BASE_URL}/api/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!resp.ok) {
+        console.warn('[Loxten] Backend returned', resp.status);
+        return null;
+      }
+
+      return await resp.json();
+    } catch (err) {
+      // Backend unreachable — degrade gracefully
+      if (err.name !== 'AbortError') {
+        console.log('[Loxten] Backend unavailable, using local heuristics only');
+      }
+      return null;
+    }
   }
 
   analyzeRequest(details) {
