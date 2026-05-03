@@ -2,19 +2,14 @@
 	import { onMount } from 'svelte';
 	import {
 		ShieldCheck,
-		Globe,
-		Warning,
 		GearSix,
 		LockSimple,
 		LockSimpleOpen,
-		Info,
 		X
 	} from 'phosphor-svelte';
 	import SecurityStatus from './Security.Status.svelte';
-	import SiteDetails from './SiteDetails.svelte';
-	import ThreatsList from './ThreatsList.svelte';
 	import Settings from './Settings.svelte';
-	import type { Threat, SecurityData, ChromeResponse, ChromeStorageResult } from './types';
+	import type { SecurityData, ChromeResponse, ChromeStorageResult, HeaderAudit, DomainAge } from './types';
 
 	let currentUrl: string = '';
 	let isHttps: boolean = false;
@@ -23,19 +18,19 @@
 		riskScore: 0,
 		threats: [],
 		trackersBlocked: 0,
-		lastScan: null
+		lastScan: null,
+		headerAudit: null,
+		domainAge: null
 	};
-	let activeTab: 'security' | 'details' | 'threats' = 'security';
 	let settingsOpen: boolean = false;
 	let isLoading: boolean = true;
 	let extensionError: boolean = false;
 	let protectionEnabled: boolean = true;
+	let currentTabId: number | null = null;
 
 	onMount((): (() => void) => {
-		// Listen for protection state changes from Settings
 		window.addEventListener('loxten:protection', handleProtectionChange as EventListener);
 
-		// Initialize data
 		(async () => {
 			if (typeof chrome !== 'undefined' && chrome.tabs) {
 				await loadCurrentTabData();
@@ -47,25 +42,24 @@
 				isHttps = true;
 				securityData = {
 					isSecure: true,
-					riskScore: 25,
-					threats: [
-						{
-							type: 'tracker',
-							severity: 'medium',
-							description: 'Sample tracker detected for demo purposes'
-						}
-					],
-					trackersBlocked: 5,
+					riskScore: 15,
+					threats: [],
+					trackersBlocked: 12,
 					lastScan: new Date(),
-					vtDetections: 0,
-					vtTotalEngines: 72,
-					sourcesChecked: ['heuristics', 'virustotal']
+					headerAudit: { checks: [
+						{ name: 'HSTS', status: 'pass', detail: 'max-age=31536000' },
+						{ name: 'CSP', status: 'pass', detail: 'Content-Security-Policy present' },
+						{ name: 'X-Frame-Options', status: 'pass', detail: 'DENY' },
+						{ name: 'X-Content-Type-Options', status: 'pass', detail: 'nosniff' },
+						{ name: 'Referrer-Policy', status: 'fail', detail: 'Missing' },
+						{ name: 'Permissions-Policy', status: 'fail', detail: 'Missing' },
+					], score: 4, total: 6, grade: 'B' },
+					domainAge: { registeredDate: '1995-08-14', ageDays: 11218 }
 				};
 				isLoading = false;
 			}
 		})();
 
-		// Cleanup runs client-side only
 		return () => {
 			window.removeEventListener('loxten:protection', handleProtectionChange as EventListener);
 		};
@@ -78,6 +72,7 @@
 				const tab = tabs[0];
 				currentUrl = tab?.url || 'Unknown';
 				isHttps = currentUrl.startsWith('https://');
+				currentTabId = tab?.id || null;
 			}
 		} catch (error) {
 			console.error('Failed to get current tab:', error);
@@ -91,7 +86,7 @@
 			if (chrome?.runtime?.sendMessage) {
 				const response: ChromeResponse = await chrome.runtime.sendMessage({
 					type: 'get_analysis',
-					url: currentUrl
+					tabId: currentTabId
 				});
 
 				if (response) {
@@ -101,13 +96,22 @@
 						threats: response.threats || [],
 						trackersBlocked: response.trackersBlocked || 0,
 						lastScan: response.timestamp ? new Date(response.timestamp) : new Date(),
-						vtDetections: response.vtDetections || 0,
-						vtTotalEngines: response.vtTotalEngines || 0,
-						vtReputation: response.vtReputation || 0,
-						gsbThreats: response.gsbThreats || [],
-						sourcesChecked: response.sourcesChecked || ['heuristics']
+						headerAudit: null,
+						domainAge: null
 					};
 				}
+
+				const headers: HeaderAudit | null = await chrome.runtime.sendMessage({
+					type: 'get_headers',
+					tabId: currentTabId
+				});
+				if (headers) securityData.headerAudit = headers;
+
+				const age: DomainAge | null = await chrome.runtime.sendMessage({
+					type: 'get_domain_age',
+					tabId: currentTabId
+				});
+				if (age) securityData.domainAge = age;
 			}
 		} catch (error) {
 			console.error('Failed to load security analysis:', error);
@@ -135,15 +139,10 @@
 
 	function formatUrl(url: string): string {
 		try {
-			const urlObj = new URL(url);
-			return urlObj.hostname;
+			return new URL(url).hostname;
 		} catch {
 			return url;
 		}
-	}
-
-	function setActiveTab(tab: 'security' | 'details' | 'threats'): void {
-		activeTab = tab;
 	}
 
 	function toggleSettings(): void {
@@ -201,53 +200,16 @@
 				<p class="loader-text">Analyzing...</p>
 			</div>
 		{:else}
-			<!-- Tabs -->
-			<nav class="tab-bar">
-				<button
-					class="tab"
-					class:active={activeTab === 'security'}
-					on:click={() => setActiveTab('security')}
-				>
-					<ShieldCheck size={13} weight={activeTab === 'security' ? 'fill' : 'regular'} />
-					Security
-				</button>
-				<button
-					class="tab"
-					class:active={activeTab === 'details'}
-					on:click={() => setActiveTab('details')}
-				>
-					<Info size={13} weight={activeTab === 'details' ? 'fill' : 'regular'} />
-					Site Details
-				</button>
-				<button
-					class="tab"
-					class:active={activeTab === 'threats'}
-					on:click={() => setActiveTab('threats')}
-				>
-					<Warning size={13} weight={activeTab === 'threats' ? 'fill' : 'regular'} />
-					Threats
-					{#if securityData.threats.length > 0}
-						<span class="tab-badge">{securityData.threats.length}</span>
-					{/if}
-				</button>
-			</nav>
-
-			<!-- Tab content -->
-			<div class="tab-panel">
-				{#if activeTab === 'security'}
-					<SecurityStatus {securityData} {currentUrl} {isHttps} />
-				{:else if activeTab === 'details'}
-					<SiteDetails {currentUrl} {isHttps} {securityData} />
-				{:else if activeTab === 'threats'}
-					<ThreatsList threats={securityData.threats} />
-				{/if}
+			<div class="main-panel">
+				<SecurityStatus {securityData} {isHttps} />
 			</div>
 		{/if}
 	</div>
 
-	<!-- Settings sidebar overlay -->
+	<!-- Settings sidebar -->
 	{#if settingsOpen}
 		<!-- svelte-ignore a11y-click-events-have-key-events -->
+		<!-- svelte-ignore a11y-no-static-element-interactions -->
 		<div class="settings-overlay" on:click={toggleSettings}></div>
 		<aside class="settings-sidebar">
 			<div class="sidebar-header">
@@ -261,19 +223,12 @@
 			</div>
 		</aside>
 	{/if}
-
-	<!-- Footer -->
-	<footer class="footer">
-		{#if securityData.lastScan}
-			<span class="scan-time">Last scan: {securityData.lastScan.toLocaleTimeString()}</span>
-		{/if}
-	</footer>
 </main>
 
 <style>
 	.lox-popup {
 		width: 380px;
-		min-height: 520px;
+		min-height: 480px;
 		font-family:
 			'Inter',
 			-apple-system,
@@ -289,7 +244,6 @@
 		position: relative;
 	}
 
-	/* Dev bar */
 	.dev-bar {
 		display: flex;
 		align-items: center;
@@ -299,7 +253,7 @@
 		border-bottom: 1px solid #141414;
 		font-size: 10px;
 		font-weight: 500;
-		color: #707070;
+		color: #999999;
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
 	}
@@ -335,14 +289,14 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #a0a0a0;
+		color: #b0b0b0;
 		flex-shrink: 0;
 	}
 
 	.brand-name {
 		font-size: 15px;
 		font-weight: 700;
-		color: #e5e5e5;
+		color: #f0f0f0;
 		letter-spacing: -0.02em;
 	}
 
@@ -361,7 +315,7 @@
 		background: #0e0e0e;
 		border: 1px solid var(--border-color, #181818);
 		font-size: 11px;
-		color: #808080;
+		color: #b0b0b0;
 		max-width: 140px;
 		overflow: hidden;
 	}
@@ -369,12 +323,12 @@
 	.url-lock {
 		display: flex;
 		align-items: center;
-		color: #606060;
+		color: #888888;
 		flex-shrink: 0;
 	}
 
 	.url-lock.secure {
-		color: #a0a0a0;
+		color: #c0c0c0;
 	}
 
 	.url-text {
@@ -389,7 +343,7 @@
 		border: 1px solid var(--border-color, #181818);
 		border-radius: 3px;
 		background: #0e0e0e;
-		color: #707070;
+		color: #999999;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -400,17 +354,17 @@
 
 	.gear-btn:hover {
 		background: #181818;
-		color: #b0b0b0;
+		color: #d0d0d0;
 		border-color: #252525;
 	}
 
 	.gear-btn.active {
 		background: #181818;
-		color: #d4d4d4;
+		color: #e0e0e0;
 		border-color: #303030;
 	}
 
-	/* Content area */
+	/* Content */
 	.content {
 		flex: 1;
 		display: flex;
@@ -418,7 +372,6 @@
 		overflow: visible;
 	}
 
-	/* Loading */
 	.loader-wrap {
 		flex: 1;
 		display: flex;
@@ -432,7 +385,7 @@
 		width: 24px;
 		height: 24px;
 		border: 2px solid #1a1a1a;
-		border-top-color: #606060;
+		border-top-color: #888888;
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
@@ -445,86 +398,32 @@
 
 	.loader-text {
 		font-size: 11px;
-		color: #606060;
+		color: #999999;
 		font-weight: 500;
 		margin: 0;
 		letter-spacing: 0.02em;
 	}
 
-	/* Tabs */
-	.tab-bar {
-		display: flex;
-		gap: 2px;
-		margin: 16px 20px 0;
-		padding: 3px;
-		background: #0a0a0a;
-		border-radius: 3px;
-		border: 1px solid var(--border-color, #181818);
-	}
-
-	.tab {
+	.main-panel {
 		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 5px;
-		padding: 9px 0;
-		border: none;
-		border-radius: 2px;
-		background: transparent;
-		color: #606060;
-		font-size: 11px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.15s ease;
-		position: relative;
-		font-family: inherit;
+		padding: 16px 20px 20px;
+		overflow-y: auto;
 	}
 
-	.tab:hover {
-		color: #909090;
-	}
-
-	.tab.active {
-		background: #181818;
-		color: #d4d4d4;
-	}
-
-	.tab-badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 15px;
-		height: 15px;
-		padding: 0 4px;
-		border-radius: 2px;
-		background: #ffffff;
-		color: #000000;
-		font-size: 9px;
-		font-weight: 700;
-	}
-
-	/* Tab content */
-	.tab-panel {
-		flex: 1;
-		padding: 20px;
-		overflow: visible;
-	}
-
-	.tab-panel::-webkit-scrollbar {
+	.main-panel::-webkit-scrollbar {
 		width: 3px;
 	}
 
-	.tab-panel::-webkit-scrollbar-track {
+	.main-panel::-webkit-scrollbar-track {
 		background: transparent;
 	}
 
-	.tab-panel::-webkit-scrollbar-thumb {
+	.main-panel::-webkit-scrollbar-thumb {
 		background: #1e1e1e;
 		border-radius: 2px;
 	}
 
-	/* Settings sidebar overlay */
+	/* Settings sidebar */
 	.settings-overlay {
 		position: absolute;
 		inset: 0;
@@ -567,7 +466,7 @@
 		margin: 0;
 		font-size: 14px;
 		font-weight: 700;
-		color: #d8d8d8;
+		color: #e8e8e8;
 	}
 
 	.sidebar-close {
@@ -576,7 +475,7 @@
 		border: 1px solid #1e1e1e;
 		border-radius: 3px;
 		background: #0e0e0e;
-		color: #808080;
+		color: #999999;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -586,7 +485,7 @@
 
 	.sidebar-close:hover {
 		background: #1a1a1a;
-		color: #d0d0d0;
+		color: #e0e0e0;
 	}
 
 	.sidebar-content {
@@ -606,21 +505,5 @@
 	.sidebar-content::-webkit-scrollbar-thumb {
 		background: #1e1e1e;
 		border-radius: 2px;
-	}
-
-	/* Footer */
-	.footer {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 10px 20px;
-		border-top: 1px solid #141414;
-		font-size: 11px;
-	}
-
-	.scan-time {
-		color: #505050;
-		font-weight: 500;
-		font-size: 10px;
 	}
 </style>

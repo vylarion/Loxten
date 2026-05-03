@@ -16,7 +16,7 @@
     padding: 0;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     background: #08090a;
-    color: #e4e4e7;
+    color: #eaeaed;
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;

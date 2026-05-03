@@ -1,60 +1,65 @@
-// Background service worker for Loxten Chrome Extension
-const API_BASE_URL = 'http://localhost:8000';
+// Loxten v2 — Background Service Worker
+// No external APIs. All analysis is local, instant, and practical.
+
+const TRACKER_DOMAINS = [
+  // --- Advertising ---
+  'doubleclick.net','googlesyndication.com','googleadservices.com','adservice.google.com',
+  'pagead2.googlesyndication.com','amazon-adsystem.com','ads.yahoo.com','ads.linkedin.com',
+  'adsrvr.org','adnxs.com','criteo.com','criteo.net','outbrain.com','taboola.com',
+  'moatads.com','rubiconproject.com','pubmatic.com','openx.net','casalemedia.com',
+  'bidswitch.net','smartadserver.com','advertising.com','contextweb.com','lijit.com',
+  'media.net','revcontent.com','sharethrough.com','33across.com','indexww.com',
+  // --- Analytics / Tracking ---
+  'google-analytics.com','analytics.google.com','googletagmanager.com',
+  'connect.facebook.net','pixel.facebook.com','bat.bing.com','scorecardresearch.com',
+  'quantserve.com','segment.io','segment.com','mixpanel.com','amplitude.com',
+  'heapanalytics.com','hotjar.com','mouseflow.com','fullstory.com','luckyorange.com',
+  'crazyegg.com','clicktale.net','inspectlet.com','optimizely.com','adobedtm.com',
+  'omtrdc.net','demdex.net','everesttech.net','chartbeat.com','parsely.com',
+  'newrelic.com','nr-data.net','bugsnag.com','sentry.io',
+  // --- Fingerprinting / Beacons ---
+  'rlcdn.com','bluekai.com','exelator.com','tapad.com','adsymptotic.com',
+  'crwdcntrl.net','eyeota.net','intentiq.com','id5-sync.com','liveintent.com',
+  'liveramp.com','dotomi.com','mathtag.com','turn.com','bkrtx.com',
+  // --- Social Trackers ---
+  'platform.twitter.com','syndication.twitter.com','static.ads-twitter.com',
+  'platform.linkedin.com','snap.licdn.com','sc-static.net','scdn.co',
+  // --- Other ---
+  'branch.io','app.link','adjust.com','appsflyer.com','kochava.com',
+  'singular.net','tealiumiq.com','ensighten.com','evidon.com','cookielaw.org'
+];
+
+// Top 60 brands for phishing detection (Levenshtein matching)
+const TOP_BRANDS = [
+  'paypal','microsoft','google','facebook','amazon','apple','netflix','instagram',
+  'twitter','linkedin','dropbox','adobe','yahoo','chase','wellsfargo','bankofamerica',
+  'citibank','americanexpress','usps','fedex','dhl','ups','walmart','ebay','costco',
+  'target','bestbuy','homedepot','lowes','macys','nordstrom','samsung','sony','hp',
+  'dell','lenovo','asus','acer','nvidia','intel','oracle','salesforce','slack',
+  'zoom','skype','whatsapp','telegram','signal','discord','spotify','steam','epic',
+  'roblox','twitch','tiktok','snapchat','pinterest','reddit','github','gitlab'
+];
 
 class LoxtenBackground {
   constructor() {
     this.settings = {
       realTimeProtection: true,
-      blockMaliciousSites: true,
       blockPhishing: true,
       blockTrackers: true,
-      blockCryptominers: true,
+      blockAnnoyances: true,
       showWarnings: true,
       autoScan: true,
       notificationLevel: 'medium',
-      scanFrequency: 'realtime',
-      whitelistMode: false
     };
-
     this.stats = {
       sitesScanned: 0,
       threatsBlocked: 0,
       trackersBlocked: 0,
-      malwareDetected: 0,
-      phishingBlocked: 0
+      phishingBlocked: 0,
     };
-
-    // Known malicious domains (in production, load from threat intelligence feeds)
-    this.maliciousDomains = new Set([
-      'malicious-example.com',
-      'phishing-site.net',
-      'fake-bank.org',
-      'scam-site.biz'
-    ]);
-
-    // Known tracker domains
-    this.trackerDomains = new Set([
-      'google-analytics.com',
-      'doubleclick.net',
-      'facebook.com',
-      'googletagmanager.com',
-      'googlesyndication.com',
-      'amazon-adsystem.com'
-    ]);
-
-    // Phishing keywords and patterns
-    this.phishingPatterns = [
-      'verify your account immediately',
-      'suspended account',
-      'click here now',
-      'limited time offer',
-      'confirm your identity',
-      'unusual activity detected',
-      'payp4l',
-      'micr0soft',
-      'g00gle'
-    ];
-
+    // Per-tab tracker counts and navigation timestamps
+    this.tabTrackerCounts = new Map();
+    this.tabNavTimestamps = new Map();
     this.init();
   }
 
@@ -62,445 +67,506 @@ class LoxtenBackground {
     await this.loadSettings();
     await this.loadStats();
     this.setupEventListeners();
-    console.log('Loxten Background Service initialized');
+    await this.setupTrackerBlocking();
+    console.log('[Loxten] Background service v2 ready');
   }
+
+  // ─── Settings / Stats ───
 
   async loadSettings() {
     try {
-      const result = await chrome.storage.sync.get('loxten_settings');
-      if (result.loxten_settings) {
-        this.settings = { ...this.settings, ...result.loxten_settings };
-      }
-    } catch (error) {
-      console.error('Failed to load settings:', error);
-    }
+      const r = await chrome.storage.sync.get('loxten_settings');
+      if (r.loxten_settings) this.settings = { ...this.settings, ...r.loxten_settings };
+    } catch (e) { console.error('[Loxten] loadSettings:', e); }
   }
 
   async loadStats() {
     try {
-      const result = await chrome.storage.local.get('loxten_stats');
-      if (result.loxten_stats) {
-        this.stats = { ...this.stats, ...result.loxten_stats };
-      }
-    } catch (error) {
-      console.error('Failed to load stats:', error);
-    }
+      const r = await chrome.storage.local.get('loxten_stats');
+      if (r.loxten_stats) this.stats = { ...this.stats, ...r.loxten_stats };
+    } catch (e) { console.error('[Loxten] loadStats:', e); }
   }
 
   async saveStats() {
+    try { await chrome.storage.local.set({ loxten_stats: this.stats }); }
+    catch (e) { console.error('[Loxten] saveStats:', e); }
+  }
+
+  // ─── Real Tracker Blocking (declarativeNetRequest) ───
+
+  async setupTrackerBlocking() {
+    if (!this.settings.blockTrackers) {
+      try { await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: TRACKER_DOMAINS.map((_, i) => i + 1) }); } catch (_) {}
+      return;
+    }
+    const rules = TRACKER_DOMAINS.map((domain, i) => ({
+      id: i + 1,
+      priority: 1,
+      action: { type: 'block' },
+      condition: {
+        urlFilter: `||${domain}`,
+        resourceTypes: ['script','image','xmlhttprequest','sub_frame','ping','font','stylesheet','media','other'],
+      }
+    }));
     try {
-      await chrome.storage.local.set({ loxten_stats: this.stats });
-    } catch (error) {
-      console.error('Failed to save stats:', error);
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: rules.map(r => r.id),
+        addRules: rules,
+      });
+      console.log(`[Loxten] Tracker blocking active: ${rules.length} domains`);
+    } catch (e) {
+      console.error('[Loxten] DNR setup failed:', e);
     }
   }
 
+  // ─── Event Listeners ───
+
   setupEventListeners() {
-    // Listen for navigation events
+    // Analyze URLs on navigation
     chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-      if (details.frameId === 0 && this.settings.realTimeProtection) {
-        this.analyzeURL(details.url, details.tabId);
+      if (details.frameId === 0) {
+        // Reset per-tab tracker count for new navigation
+        this.tabTrackerCounts.set(details.tabId, 0);
+        this.tabNavTimestamps.set(details.tabId, Date.now());
+        if (this.settings.realTimeProtection) {
+          this.analyzeURL(details.url, details.tabId);
+        }
       }
     });
 
-    // Listen for web requests to detect trackers
-    chrome.webRequest.onBeforeRequest.addListener(
-      (details) => this.analyzeRequest(details),
-      { urls: ['<all_urls>'] },
-      []
+    // Capture response headers for security audit
+    chrome.webRequest.onHeadersReceived.addListener(
+      (details) => this.captureHeaders(details),
+      { urls: ['<all_urls>'], types: ['main_frame'] },
+      ['responseHeaders']
     );
 
-    // Handle messages from popup and content scripts
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      this.handleMessage(message, sender, sendResponse);
-      return true; // Keep message channel open for async responses
+    // Count blocked trackers via declarativeNetRequest feedback
+    // onRuleMatchedDebug works for unpacked extensions (dev mode)
+    try {
+      if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
+        chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
+          const tabId = info.request?.tabId;
+          if (tabId && tabId > 0) {
+            const current = this.tabTrackerCounts.get(tabId) || 0;
+            this.tabTrackerCounts.set(tabId, current + 1);
+            this.stats.trackersBlocked++;
+            // Debounce save
+            clearTimeout(this._trackerSaveTimer);
+            this._trackerSaveTimer = setTimeout(() => this.saveStats(), 3000);
+          }
+        });
+        console.log('[Loxten] Real-time tracker counting active (onRuleMatchedDebug)');
+      }
+    } catch (e) {
+      console.log('[Loxten] onRuleMatchedDebug not available, using getMatchedRules fallback');
+    }
+
+    // Messages from popup / content
+    chrome.runtime.onMessage.addListener((msg, sender, respond) => {
+      this.handleMessage(msg, sender, respond);
+      return true;
     });
 
-    // Handle tab updates
-    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-      if (changeInfo.status === 'complete' && tab.url) {
-        this.updateBadge(tabId);
-      }
+    // Badge update on tab complete
+    chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+      if (info.status === 'complete' && tab.url) this.updateBadge(tabId);
+    });
+
+    // Clean up per-tab data when tab is closed
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      this.tabTrackerCounts.delete(tabId);
+      this.tabNavTimestamps.delete(tabId);
+      // Clean storage
+      chrome.storage.local.remove([`analysis_${tabId}`, `headers_${tabId}`, `domainAge_${tabId}`]).catch(() => {});
     });
   }
+
+  // ─── Header Security Audit ───
+
+  captureHeaders(details) {
+    if (!details.responseHeaders) return;
+    const headers = {};
+    for (const h of details.responseHeaders) {
+      headers[h.name.toLowerCase()] = h.value || '';
+    }
+    const audit = this.auditHeaders(headers);
+    // Store per-tab
+    const key = `headers_${details.tabId}`;
+    chrome.storage.local.set({ [key]: audit }).catch(() => {});
+  }
+
+  auditHeaders(headers) {
+    const checks = [];
+    let score = 0;
+    const total = 6;
+
+    // 1. HSTS
+    if (headers['strict-transport-security']) {
+      checks.push({ name: 'HSTS', status: 'pass', detail: headers['strict-transport-security'] });
+      score++;
+    } else {
+      checks.push({ name: 'HSTS', status: 'fail', detail: 'Missing Strict-Transport-Security header' });
+    }
+
+    // 2. CSP
+    if (headers['content-security-policy']) {
+      checks.push({ name: 'CSP', status: 'pass', detail: 'Content-Security-Policy present' });
+      score++;
+    } else {
+      checks.push({ name: 'CSP', status: 'fail', detail: 'No Content-Security-Policy header' });
+    }
+
+    // 3. X-Frame-Options
+    if (headers['x-frame-options']) {
+      checks.push({ name: 'X-Frame-Options', status: 'pass', detail: headers['x-frame-options'] });
+      score++;
+    } else {
+      checks.push({ name: 'X-Frame-Options', status: 'fail', detail: 'Missing — vulnerable to clickjacking' });
+    }
+
+    // 4. X-Content-Type-Options
+    if (headers['x-content-type-options']?.toLowerCase() === 'nosniff') {
+      checks.push({ name: 'X-Content-Type-Options', status: 'pass', detail: 'nosniff' });
+      score++;
+    } else {
+      checks.push({ name: 'X-Content-Type-Options', status: 'fail', detail: 'Missing nosniff — MIME sniffing possible' });
+    }
+
+    // 5. Referrer-Policy
+    if (headers['referrer-policy']) {
+      checks.push({ name: 'Referrer-Policy', status: 'pass', detail: headers['referrer-policy'] });
+      score++;
+    } else {
+      checks.push({ name: 'Referrer-Policy', status: 'fail', detail: 'Missing — referrer may leak to third parties' });
+    }
+
+    // 6. Permissions-Policy
+    if (headers['permissions-policy']) {
+      checks.push({ name: 'Permissions-Policy', status: 'pass', detail: 'Present' });
+      score++;
+    } else {
+      checks.push({ name: 'Permissions-Policy', status: 'fail', detail: 'Missing — browser features unrestricted' });
+    }
+
+    const pct = Math.round((score / total) * 100);
+    const grade = pct >= 90 ? 'A+' : pct >= 80 ? 'A' : pct >= 65 ? 'B' : pct >= 50 ? 'C' : pct >= 30 ? 'D' : 'F';
+
+    return { checks, score, total, grade };
+  }
+
+  // ─── URL Analysis ───
 
   async analyzeURL(url, tabId) {
     try {
       const urlObj = new URL(url);
       const domain = urlObj.hostname.toLowerCase();
-
-      // Skip chrome:// and extension:// URLs
-      if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-        return;
-      }
+      if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('about:')) return;
 
       this.stats.sitesScanned++;
+      const analysis = { url, domain, threats: [], riskScore: 0, trackersBlocked: 0, timestamp: Date.now(), isSecure: true };
 
-      const analysis = {
-        url: url,
-        domain: domain,
-        threats: [],
-        riskScore: 0,
-        trackersBlocked: 0,
-        timestamp: Date.now(),
-        isSecure: true
-      };
-
-      // Check against malicious domains
-      if (this.maliciousDomains.has(domain)) {
-        analysis.threats.push({
-          type: 'malicious_domain',
-          severity: 'high',
-          description: `Known malicious domain: ${domain}`
-        });
-        analysis.riskScore += 80;
-        this.stats.malwareDetected++;
-        this.stats.threatsBlocked++;
-      }
-
-      // Check for phishing indicators
-      const phishingCheck = this.detectPhishing(domain, urlObj);
-      if (phishingCheck.isPhishing) {
-        analysis.threats.push({
-          type: 'phishing',
-          severity: 'high',
-          description: phishingCheck.reason
-        });
+      // Phishing detection
+      const phish = this.detectPhishing(domain, urlObj);
+      if (phish.isPhishing) {
+        analysis.threats.push({ type: 'phishing', severity: 'high', description: phish.reason });
         analysis.riskScore += 70;
         this.stats.phishingBlocked++;
         this.stats.threatsBlocked++;
       }
 
-      // Check URL structure for suspicious patterns
+      // URL structure analysis
       const urlCheck = this.analyzeURLStructure(urlObj);
       if (urlCheck.suspicious) {
-        analysis.threats.push({
-          type: 'suspicious_url',
-          severity: 'medium',
-          description: urlCheck.reason
-        });
+        analysis.threats.push({ type: 'suspicious_url', severity: urlCheck.severity, description: urlCheck.reason });
         analysis.riskScore += urlCheck.score;
       }
 
-      // ─── Backend enrichment (VT + GSB) ───
-      const backendResult = await this.checkBackend(url);
-      if (backendResult) {
-        // Merge backend threats
-        if (backendResult.threats && backendResult.threats.length > 0) {
-          for (const t of backendResult.threats) {
-            analysis.threats.push(t);
-          }
-        }
-        // Use the higher risk score
-        analysis.riskScore = Math.min(Math.max(analysis.riskScore, backendResult.risk_score || 0), 100);
-        // Attach VT/GSB metadata
-        analysis.vtDetections = backendResult.vt_detections || 0;
-        analysis.vtTotalEngines = backendResult.vt_total_engines || 0;
-        analysis.vtReputation = backendResult.vt_reputation || 0;
-        analysis.gsbThreats = backendResult.gsb_threats || [];
-        analysis.sourcesChecked = backendResult.sources_checked || ['heuristics'];
-      }
+      // Domain age check (RDAP — fire-and-forget, updates analysis async)
+      this.checkDomainAge(domain, tabId);
 
-      // Determine if site is secure
+      analysis.riskScore = Math.min(analysis.riskScore, 100);
       analysis.isSecure = analysis.riskScore < 30;
 
-      // Store analysis
       await this.storeAnalysis(tabId, analysis);
-
-      // Show warning if high risk and warnings enabled
       if (analysis.riskScore >= 60 && this.settings.showWarnings) {
         this.showSecurityWarning(tabId, analysis);
       }
-
-      // Update badge
       this.updateBadge(tabId, analysis);
-
       await this.saveStats();
-
-    } catch (error) {
-      console.error('URL analysis failed:', error);
+    } catch (e) {
+      console.error('[Loxten] analyzeURL:', e);
     }
   }
+
+  // ─── Phishing Detection (Levenshtein + IDN + combo-squatting) ───
 
   detectPhishing(domain, urlObj) {
     const result = { isPhishing: false, reason: '' };
 
-    // Check for character substitution in common domains
-    const commonDomains = ['paypal', 'microsoft', 'google', 'facebook', 'amazon', 'apple'];
-    for (const commonDomain of commonDomains) {
-      if (domain.includes(commonDomain) && !domain.includes(`${commonDomain}.com`)) {
-        // Check for character substitution
-        if (this.hasCharacterSubstitution(domain, commonDomain)) {
-          result.isPhishing = true;
-          result.reason = `Possible phishing attempt targeting ${commonDomain}`;
-          break;
+    // 1. IDN homograph attack (Punycode)
+    if (domain.startsWith('xn--') || /xn--/.test(domain)) {
+      result.isPhishing = true;
+      result.reason = 'Internationalized domain (Punycode) — may disguise a lookalike domain';
+      return result;
+    }
+
+    // 2. Extract base domain name (without TLD)
+    const domainBase = domain.split('.').slice(0, -1).join('.').replace(/[-_.]/g, '');
+
+    // If this domain IS a known brand, it's legitimate — skip all typosquat checks
+    if (TOP_BRANDS.includes(domainBase)) {
+      return result;
+    }
+
+    // 3. Levenshtein distance against top brands
+    for (const brand of TOP_BRANDS) {
+      const dist = this.levenshtein(domainBase, brand);
+      // Require closer match for shorter names to reduce false positives
+      const maxDist = domainBase.length >= 7 ? 2 : 1;
+      if (dist > 0 && dist <= maxDist && domainBase.length >= 4) {
+        result.isPhishing = true;
+        result.reason = `Domain "${domain}" is suspiciously similar to "${brand}" (possible typosquat)`;
+        return result;
+      }
+    }
+
+    // 4. Combo-squatting (brand name + suspicious suffix)
+    const suspiciousSuffixes = ['login','secure','verify','account','update','confirm','auth','support','help','service','alert','billing','payment'];
+    for (const brand of TOP_BRANDS) {
+      if (domain.includes(brand) && !domain.endsWith(`${brand}.com`) && !domain.endsWith(`${brand}.net`) && !domain.endsWith(`${brand}.org`)) {
+        for (const suffix of suspiciousSuffixes) {
+          if (domain.includes(suffix)) {
+            result.isPhishing = true;
+            result.reason = `Combo-squatting detected: "${domain}" uses "${brand}" with suspicious keyword "${suffix}"`;
+            return result;
+          }
         }
       }
     }
 
-    // Check for suspicious TLDs
-    const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.cc'];
+    // 5. Suspicious TLDs
+    const suspiciousTLDs = ['.tk','.ml','.ga','.cf','.cc','.top','.xyz','.buzz','.club','.info','.work','.click','.loan','.win'];
     if (suspiciousTLDs.some(tld => domain.endsWith(tld))) {
-      result.isPhishing = true;
-      result.reason = 'Uses suspicious top-level domain often associated with phishing';
-    }
-
-    // Check for URL shorteners
-    const shorteners = ['bit.ly', 'tinyurl.com', 't.co', 'short.link'];
-    if (shorteners.some(shortener => domain.includes(shortener))) {
-      result.isPhishing = true;
-      result.reason = 'URL shortener detected - may hide real destination';
-    }
-
-    return result;
-  }
-
-  hasCharacterSubstitution(domain, target) {
-    // Simple character substitution detection
-    const substitutions = {
-      'o': '0',
-      'i': '1',
-      'l': '1',
-      'e': '3',
-      'a': '@',
-      's': '$'
-    };
-
-    let modifiedTarget = target;
-    for (const [char, sub] of Object.entries(substitutions)) {
-      modifiedTarget = modifiedTarget.replace(new RegExp(char, 'g'), sub);
-      if (domain.includes(modifiedTarget)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  analyzeURLStructure(urlObj) {
-    const result = { suspicious: false, reason: '', score: 0 };
-
-    // Check for IP address instead of domain
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(urlObj.hostname)) {
-      result.suspicious = true;
-      result.reason = 'Uses IP address instead of domain name';
-      result.score = 40;
+      result.reason = 'Uses a TLD commonly associated with phishing and spam';
       return result;
     }
 
-    // Check URL length
-    if (urlObj.href.length > 100) {
-      result.suspicious = true;
-      result.reason = 'Unusually long URL';
-      result.score = 20;
+    return result;
+  }
+
+  levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+      }
+    }
+    return dp[m][n];
+  }
+
+  analyzeURLStructure(urlObj) {
+    const result = { suspicious: false, reason: '', score: 0, severity: 'medium' };
+
+    // IP address instead of domain
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(urlObj.hostname)) {
+      return { suspicious: true, reason: 'Uses raw IP address instead of a domain name', score: 40, severity: 'medium' };
     }
 
-    // Check for too many subdomains
-    const subdomains = urlObj.hostname.split('.');
-    if (subdomains.length > 4) {
-      result.suspicious = true;
-      result.reason = 'Too many subdomains';
-      result.score += 25;
+    // Excessive subdomains (>4 levels)
+    const parts = urlObj.hostname.split('.');
+    if (parts.length > 4) {
+      return { suspicious: true, reason: `Unusual number of subdomains (${parts.length} levels)`, score: 25, severity: 'low' };
     }
 
-    // Check for suspicious patterns in path
-    const suspiciousPathPatterns = [
-      /login.*secure/i,
-      /verify.*account/i,
-      /update.*payment/i,
-      /suspended/i
-    ];
+    // Suspicious path patterns
+    const pathPatterns = [/login.*secure/i, /verify.*account/i, /update.*payment/i, /confirm.*identity/i, /suspended/i];
+    if (pathPatterns.some(p => p.test(urlObj.pathname + urlObj.search))) {
+      return { suspicious: true, reason: 'URL path contains patterns common in phishing pages', score: 30, severity: 'medium' };
+    }
 
-    if (suspiciousPathPatterns.some(pattern => pattern.test(urlObj.pathname))) {
-      result.suspicious = true;
-      result.reason = 'Suspicious path pattern detected';
-      result.score += 30;
+    // @ symbol in URL (credential harvesting trick)
+    if (urlObj.href.includes('@') && !urlObj.href.startsWith('mailto:')) {
+      return { suspicious: true, reason: 'URL contains @ symbol — may be disguising the real destination', score: 45, severity: 'high' };
     }
 
     return result;
   }
 
-  async checkBackend(url) {
+  // ─── Domain Age (RDAP — free, no API key) ───
+
+  async checkDomainAge(domain, tabId) {
+    // Extract registrable domain (last two parts)
+    const parts = domain.split('.');
+    const regDomain = parts.length >= 2 ? parts.slice(-2).join('.') : domain;
+
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      setTimeout(() => controller.abort(), 5000);
 
-      const resp = await fetch(`${API_BASE_URL}/api/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-        signal: controller.signal
+      const resp = await fetch(`https://rdap.org/domain/${regDomain}`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/rdap+json' }
       });
 
-      clearTimeout(timeoutId);
+      if (!resp.ok) return;
+      const data = await resp.json();
 
-      if (!resp.ok) {
-        console.warn('[Loxten] Backend returned', resp.status);
-        return null;
+      // Find registration event
+      let regDate = null;
+      if (data.events) {
+        const reg = data.events.find(e => e.eventAction === 'registration');
+        if (reg && reg.eventDate) {
+          regDate = new Date(reg.eventDate);
+        }
       }
 
-      return await resp.json();
-    } catch (err) {
-      // Backend unreachable — degrade gracefully
-      if (err.name !== 'AbortError') {
-        console.log('[Loxten] Backend unavailable, using local heuristics only');
+      if (regDate) {
+        const ageDays = Math.floor((Date.now() - regDate.getTime()) / 86400000);
+        const domainAge = { registeredDate: regDate.toISOString().slice(0, 10), ageDays };
+
+        // Store per-tab
+        const key = `domainAge_${tabId}`;
+        await chrome.storage.local.set({ [key]: domainAge });
+
+        // If domain is very new (<30 days), add it as a threat
+        if (ageDays < 30) {
+          const aKey = `analysis_${tabId}`;
+          const stored = await chrome.storage.local.get(aKey);
+          if (stored[aKey]) {
+            stored[aKey].threats.push({
+              type: 'new_domain',
+              severity: ageDays < 7 ? 'high' : 'medium',
+              description: `Domain registered only ${ageDays} day${ageDays !== 1 ? 's' : ''} ago — new domains are often used for scams`
+            });
+            stored[aKey].riskScore = Math.min(stored[aKey].riskScore + (ageDays < 7 ? 35 : 20), 100);
+            stored[aKey].isSecure = stored[aKey].riskScore < 30;
+            await chrome.storage.local.set({ [aKey]: stored[aKey] });
+            this.updateBadge(tabId, stored[aKey]);
+          }
+        }
       }
-      return null;
+    } catch (_) {
+      // RDAP lookup failed — not critical, just skip
     }
   }
 
-  analyzeRequest(details) {
-    const url = new URL(details.url);
-    const domain = url.hostname.toLowerCase();
-
-    // Check for trackers
-    if (this.settings.blockTrackers && (this.trackerDomains.has(domain) || this.isKnownTracker(domain))) {
-      this.stats.trackersBlocked++;
-      this.saveStats();
-
-      // Notify content script
-      if (details.tabId && details.tabId !== -1) {
-        chrome.tabs.sendMessage(details.tabId, {
-          type: 'tracker_detected',
-          trackers: [{ domain: domain, url: details.url }]
-        }).catch(() => { }); // Ignore errors if tab is closed
-      }
-
-      // Block the request
-      return { cancel: true };
-    }
-  }
-
-  isKnownTracker(domain) {
-    const trackerPatterns = [
-      /google-analytics/,
-      /googletagmanager/,
-      /doubleclick/,
-      /facebook\.com.*\/tr/,
-      /amazon-adsystem/,
-      /googlesyndication/,
-      /scorecardresearch/,
-      /quantserve/
-    ];
-
-    return trackerPatterns.some(pattern => pattern.test(domain));
-  }
+  // ─── Warning / Badge / Storage ───
 
   async showSecurityWarning(tabId, analysis) {
     try {
-      await chrome.tabs.sendMessage(tabId, {
-        type: 'security_warning',
-        analysis: analysis
-      });
-    } catch (error) {
-      // Tab might be closed or not ready
-      console.log('Could not send warning to tab:', error.message);
-    }
+      await chrome.tabs.sendMessage(tabId, { type: 'security_warning', analysis });
+    } catch (_) {}
   }
 
   updateBadge(tabId, analysis = null) {
     if (analysis && analysis.threats.length > 0) {
-      chrome.action.setBadgeText({
-        tabId: tabId,
-        text: analysis.threats.length.toString()
-      });
-
-      const color = analysis.riskScore >= 80 ? '#dc2626' :
-        analysis.riskScore >= 60 ? '#ea580c' : '#f59e0b';
-
-      chrome.action.setBadgeBackgroundColor({
-        tabId: tabId,
-        color: color
-      });
+      chrome.action.setBadgeText({ tabId, text: analysis.threats.length.toString() });
+      const color = analysis.riskScore >= 80 ? '#dc2626' : analysis.riskScore >= 60 ? '#ea580c' : '#f59e0b';
+      chrome.action.setBadgeBackgroundColor({ tabId, color });
     } else {
-      chrome.action.setBadgeText({
-        tabId: tabId,
-        text: ''
-      });
+      chrome.action.setBadgeText({ tabId, text: '' });
     }
   }
 
   async storeAnalysis(tabId, analysis) {
-    const key = `analysis_${tabId}`;
-    try {
-      await chrome.storage.local.set({ [key]: analysis });
-    } catch (error) {
-      console.error('Failed to store analysis:', error);
-    }
+    try { await chrome.storage.local.set({ [`analysis_${tabId}`]: analysis }); }
+    catch (_) {}
   }
 
-  async handleMessage(message, sender, sendResponse) {
+  async handleMessage(msg, sender, respond) {
     try {
-      switch (message.type) {
-        case 'get_analysis':
-          const analysis = await this.getStoredAnalysis(sender.tab?.id);
-          sendResponse(analysis);
+      switch (msg.type) {
+        case 'get_analysis': {
+          const tabId = msg.tabId || sender.tab?.id;
+          const a = await this.getStoredAnalysis(tabId);
+          // Attach real tracker count for this tab
+          if (a && tabId) {
+            a.trackersBlocked = await this.getTabTrackerCount(tabId);
+          }
+          respond(a);
           break;
-
-        case 'force_scan':
+        }
+        case 'get_headers': {
+          const tabId = msg.tabId || sender.tab?.id;
+          const key = `headers_${tabId}`;
+          const r = await chrome.storage.local.get(key);
+          respond(r[key] || null);
+          break;
+        }
+        case 'get_domain_age': {
+          const tabId = msg.tabId || sender.tab?.id;
+          const key = `domainAge_${tabId}`;
+          const r = await chrome.storage.local.get(key);
+          respond(r[key] || null);
+          break;
+        }
+        case 'force_scan': {
           if (sender.tab?.id && sender.tab?.url) {
             await this.analyzeURL(sender.tab.url, sender.tab.id);
-            const newAnalysis = await this.getStoredAnalysis(sender.tab.id);
-            sendResponse(newAnalysis);
+            respond(await this.getStoredAnalysis(sender.tab.id));
           }
           break;
-
-        case 'settings_updated':
-          this.settings = { ...this.settings, ...message.settings };
-          sendResponse({ success: true });
+        }
+        case 'settings_updated': {
+          this.settings = { ...this.settings, ...msg.settings };
+          await this.setupTrackerBlocking();
+          respond({ success: true });
           break;
-
-        case 'get_stats':
-          sendResponse(this.stats);
+        }
+        case 'get_stats': {
+          respond(this.stats);
           break;
-
-        case 'report_suspicious':
-          // Handle suspicious content reports from content script
-          console.log('Suspicious content reported:', message.data);
-          sendResponse({ success: true });
+        }
+        case 'get_settings': {
+          respond(this.settings);
           break;
-
-        case 'update_tracker_count':
-          if (sender.tab?.id) {
-            const key = `analysis_${sender.tab.id}`;
-            const result = await chrome.storage.local.get(key);
-            if (result[key]) {
-              result[key].trackersBlocked = message.count;
-              await chrome.storage.local.set({ [key]: result[key] });
-            }
-          }
-          sendResponse({ success: true });
-          break;
-
+        }
         default:
-          sendResponse({ error: 'Unknown message type' });
+          respond({ error: 'Unknown message type' });
       }
-    } catch (error) {
-      console.error('Error handling message:', error);
-      sendResponse({ error: error.message });
+    } catch (e) {
+      console.error('[Loxten] handleMessage:', e);
+      respond({ error: e.message });
     }
   }
 
   async getStoredAnalysis(tabId) {
     if (!tabId) return null;
-
-    const key = `analysis_${tabId}`;
     try {
-      const result = await chrome.storage.local.get(key);
-      return result[key] || {
-        url: 'Unknown',
-        domain: 'Unknown',
-        threats: [],
-        riskScore: 0,
-        trackersBlocked: this.stats.trackersBlocked,
-        timestamp: Date.now(),
-        isSecure: true
+      const r = await chrome.storage.local.get(`analysis_${tabId}`);
+      return r[`analysis_${tabId}`] || {
+        url: 'Unknown', domain: 'Unknown', threats: [], riskScore: 0,
+        trackersBlocked: 0, timestamp: Date.now(), isSecure: true
       };
-    } catch (error) {
-      console.error('Failed to get stored analysis:', error);
-      return null;
+    } catch (_) { return null; }
+  }
+
+  // Get tracker count for a specific tab
+  async getTabTrackerCount(tabId) {
+    // First try in-memory count (from onRuleMatchedDebug)
+    const memCount = this.tabTrackerCounts.get(tabId) || 0;
+    if (memCount > 0) return memCount;
+
+    // Fallback: query declarativeNetRequest for matched rules
+    try {
+      const navTimestamp = this.tabNavTimestamps.get(tabId) || 0;
+      const result = await chrome.declarativeNetRequest.getMatchedRules({
+        tabId,
+        minTimeStamp: navTimestamp > 0 ? navTimestamp : undefined
+      });
+      const count = result?.rulesMatchedInfo?.length || 0;
+      if (count > 0) {
+        this.tabTrackerCounts.set(tabId, count);
+      }
+      return count;
+    } catch (_) {
+      return memCount;
     }
   }
 }
 
-// Initialize the background service
 const loxten = new LoxtenBackground();

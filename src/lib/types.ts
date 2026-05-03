@@ -1,4 +1,4 @@
-// Shared type definitions for Loxten extension
+// Loxten v2 — Shared type definitions
 
 export interface Threat {
   type: string;
@@ -9,37 +9,48 @@ export interface Threat {
   ignored?: boolean;
 }
 
+export interface HeaderCheck {
+  name: string;
+  status: 'pass' | 'fail';
+  detail: string;
+}
+
+export interface HeaderAudit {
+  checks: HeaderCheck[];
+  score: number;
+  total: number;
+  grade: string;
+}
+
+export interface DomainAge {
+  registeredDate: string;
+  ageDays: number;
+}
+
 export interface SecurityData {
   isSecure: boolean;
   riskScore: number;
   threats: Threat[];
   trackersBlocked: number;
   lastScan: Date | null;
-  vtDetections?: number;
-  vtTotalEngines?: number;
-  vtReputation?: number;
-  gsbThreats?: string[];
-  sourcesChecked?: string[];
+  headerAudit?: HeaderAudit | null;
+  domainAge?: DomainAge | null;
 }
 
 export interface Settings {
   realTimeProtection: boolean;
-  blockMaliciousSites: boolean;
   blockPhishing: boolean;
   blockTrackers: boolean;
-  blockCryptominers: boolean;
+  blockAnnoyances: boolean;
   showWarnings: boolean;
   autoScan: boolean;
   notificationLevel: 'low' | 'medium' | 'high';
-  scanFrequency: 'realtime' | 'periodic' | 'manual';
-  whitelistMode: boolean;
 }
 
 export interface Stats {
   sitesScanned: number;
   threatsBlocked: number;
   trackersBlocked: number;
-  malwareDetected: number;
   phishingBlocked: number;
 }
 
@@ -60,11 +71,6 @@ export interface ChromeResponse {
   threats?: Threat[];
   trackersBlocked?: number;
   timestamp?: number;
-  vtDetections?: number;
-  vtTotalEngines?: number;
-  vtReputation?: number;
-  gsbThreats?: string[];
-  sourcesChecked?: string[];
 }
 
 export interface ChromeStorageResult {

@@ -1,35 +1,24 @@
-// Content script for Loxten - monitors page content in real-time
+// Loxten v2 — Content Script
+// Runs on every page: phishing content analysis, form monitoring, link safety preview.
+
 class LoxtenContentScript {
   constructor() {
-    this.observers = [];
     this.warningShown = false;
-    this.suspiciousElements = [];
-    this.trackerCount = 0;
-
-    // Only run on actual web pages
-    if (this.shouldRun()) {
-      this.init();
-    }
+    this.observers = [];
+    this.linkTooltip = null;
+    if (this.shouldRun()) this.init();
   }
 
   shouldRun() {
-    // Don't run on extension pages, chrome pages, etc.
     const url = window.location.href;
-    return !url.startsWith('chrome://') &&
-      !url.startsWith('chrome-extension://') &&
-      !url.startsWith('moz-extension://') &&
-      !url.startsWith('about:');
+    return !url.startsWith('chrome://') && !url.startsWith('chrome-extension://') &&
+           !url.startsWith('moz-extension://') && !url.startsWith('about:');
   }
 
   init() {
-    // Set up message listener first
     this.setupMessageListener();
-
-    // Wait for DOM to be ready
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        this.startMonitoring();
-      });
+      document.addEventListener('DOMContentLoaded', () => this.startMonitoring());
     } else {
       this.startMonitoring();
     }
@@ -37,609 +26,600 @@ class LoxtenContentScript {
 
   startMonitoring() {
     try {
-      // Start monitoring page content
-      this.setupDOMObserver();
       this.analyzeCurrentPage();
       this.monitorForms();
-      this.detectClickjacking();
-      this.checkForCryptomining();
-
-      console.log('Loxten content script initialized on:', window.location.hostname);
-    } catch (error) {
-      console.error('Loxten content script error:', error);
+      this.setupLinkSafetyPreview();
+      this.setupDOMObserver();
+      this.initAnnoyanceBlocker();
+    } catch (e) {
+      console.error('[Loxten] content script error:', e);
     }
   }
 
+  // ─── Message Handling ───
+
   setupMessageListener() {
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       try {
-        switch (message.type) {
-          case 'security_warning':
-            this.showSecurityWarning(message.analysis);
-            break;
-          case 'tracker_detected':
-            this.handleTrackerDetection(message);
-            break;
-          case 'suspicious_elements':
-            this.highlightSuspiciousElements(message.elements);
-            break;
-        }
-        sendResponse({ success: true });
-      } catch (error) {
-        sendResponse({ error: error.message });
+        if (msg.type === 'security_warning') this.showSecurityWarning(msg.analysis);
+        respond({ success: true });
+      } catch (e) {
+        respond({ error: e.message });
       }
     });
   }
 
-  setupDOMObserver() {
-    // Monitor for dynamically added content
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'childList') {
-          mutation.addedNodes.forEach((node) => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              this.analyzeNewElement(node);
-            }
-          });
-        }
-      });
-    });
-
-    observer.observe(document.body || document.documentElement, {
-      childList: true,
-      subtree: true
-    });
-
-    this.observers.push(observer);
-  }
+  // ─── Page Analysis ───
 
   analyzeCurrentPage() {
-    // Analyze the current page content
     this.checkForPhishingIndicators();
     this.analyzeForms();
-    this.checkForSuspiciousScripts();
-    this.detectHiddenElements();
+    this.detectHiddenIframes();
   }
 
   checkForPhishingIndicators() {
     const indicators = [];
-
-    // Check page text for phishing keywords
     const pageText = document.body ? document.body.textContent.toLowerCase() : '';
-    const phishingKeywords = [
+
+    // Phishing urgency language
+    const phishingPhrases = [
       'verify your account immediately',
-      'account suspended',
-      'click here now',
-      'limited time offer',
-      'confirm your identity',
+      'account has been suspended',
+      'confirm your identity now',
       'unusual activity detected',
       'urgent action required',
-      'winner selected',
-      'claim your prize'
+      'your account will be closed',
+      'click here to restore access',
+      'verify your payment method',
     ];
-
-    phishingKeywords.forEach(keyword => {
-      if (pageText.includes(keyword)) {
+    for (const phrase of phishingPhrases) {
+      if (pageText.includes(phrase)) {
         indicators.push({
           type: 'phishing_language',
-          element: 'page_content',
-          description: `Suspicious phishing language detected: "${keyword}"`
+          description: `Phishing language detected: "${phrase}"`
         });
+        break; // one is enough
       }
-    });
-
-    // Check for fake login forms
-    const loginForms = document.querySelectorAll('form input[type="password"]');
-    loginForms.forEach(passwordInput => {
-      const form = passwordInput.closest('form');
-      if (form) {
-        const action = form.getAttribute('action');
-        if (action && !action.includes(window.location.hostname)) {
-          indicators.push({
-            type: 'external_login_form',
-            element: form,
-            description: 'Login form submits to external domain'
-          });
-        }
-      }
-    });
-
-    // Check for fake security badges/logos
-    const images = document.querySelectorAll('img');
-    const securityKeywords = ['secure', 'verified', 'ssl', 'certificate', 'trust'];
-    images.forEach(img => {
-      const alt = (img.alt || '').toLowerCase();
-      const src = (img.src || '').toLowerCase();
-
-      if (securityKeywords.some(keyword => alt.includes(keyword) || src.includes(keyword))) {
-        // Check if it's actually a legitimate security badge
-        if (!this.isLegitimateSecurityBadge(img.src)) {
-          indicators.push({
-            type: 'fake_security_badge',
-            element: img,
-            description: 'Potentially fake security badge detected'
-          });
-        }
-      }
-    });
-
-    if (indicators.length > 0) {
-      this.reportSuspiciousContent(indicators);
     }
-  }
 
-  isLegitimateSecurityBadge(src) {
-    const legitimateDomains = [
-      'ssl.com',
-      'symantec.com',
-      'verisign.com',
-      'comodo.com',
-      'thawte.com',
-      'godaddy.com'
-    ];
+    // Login forms submitting to external domains
+    const forms = document.querySelectorAll('form');
+    for (const form of forms) {
+      const hasPassword = form.querySelector('input[type="password"]');
+      if (!hasPassword) continue;
 
-    try {
-      const url = new URL(src, window.location.href);
-      return legitimateDomains.some(domain => url.hostname.includes(domain));
-    } catch {
-      return false;
+      const action = form.getAttribute('action');
+      if (action && !action.startsWith('/') && !action.startsWith('#')) {
+        try {
+          const actionUrl = new URL(action, window.location.href);
+          if (actionUrl.hostname !== window.location.hostname) {
+            indicators.push({
+              type: 'external_login_form',
+              description: `Login form submits credentials to external domain: ${actionUrl.hostname}`
+            });
+          }
+        } catch (_) {}
+      }
+
+      // formaction override on submit buttons
+      const submits = form.querySelectorAll('button[formaction], input[formaction]');
+      for (const btn of submits) {
+        try {
+          const faUrl = new URL(btn.getAttribute('formaction'), window.location.href);
+          if (faUrl.hostname !== window.location.hostname) {
+            indicators.push({
+              type: 'external_login_form',
+              description: `Submit button redirects credentials to: ${faUrl.hostname}`
+            });
+          }
+        } catch (_) {}
+      }
     }
+
+    if (indicators.length > 0) this.reportSuspicious(indicators);
   }
 
   analyzeForms() {
     const forms = document.querySelectorAll('form');
-    forms.forEach(form => {
-      // Check for insecure password forms
+    for (const form of forms) {
       const passwordInputs = form.querySelectorAll('input[type="password"]');
-      if (passwordInputs.length > 0) {
-        if (window.location.protocol !== 'https:') {
-          this.showRealTimeWarning('⚠️ Password form on insecure connection!');
-        }
+      if (passwordInputs.length === 0) continue;
 
-        if (form.method && form.method.toLowerCase() === 'get') {
-          this.showRealTimeWarning('⚠️ Password form using insecure GET method!');
-        }
+      // Password over HTTP
+      if (window.location.protocol !== 'https:') {
+        this.showToast('⚠️ Password form on insecure HTTP connection!');
       }
 
-      // Check for forms with suspicious hidden inputs
-      const hiddenInputs = form.querySelectorAll('input[type="hidden"]');
-      hiddenInputs.forEach(input => {
-        if (input.value && input.value.length > 200) {
-          this.reportSuspiciousContent([{
-            type: 'suspicious_hidden_input',
-            element: input,
-            description: 'Hidden form input with unusually large value'
-          }]);
-        }
-      });
-    });
-  }
+      // Password via GET method
+      if (form.method && form.method.toLowerCase() === 'get') {
+        this.showToast('⚠️ Password form using GET method — credentials will appear in URL!');
+      }
 
-  checkForSuspiciousScripts() {
-    const scripts = document.querySelectorAll('script');
-    scripts.forEach(script => {
-      if (script.src) {
-        // External script analysis
-        try {
-          const url = new URL(script.src, window.location.href);
-          if (this.isSuspiciousScriptSource(url)) {
-            this.reportSuspiciousContent([{
-              type: 'suspicious_external_script',
-              element: script,
-              description: `Suspicious external script: ${url.hostname}`
-            }]);
-          }
-        } catch (e) {
-          this.reportSuspiciousContent([{
-            type: 'invalid_script_url',
-            element: script,
-            description: 'Script with invalid URL'
+      // autocomplete="off" on password fields (common phishing trick)
+      for (const pw of passwordInputs) {
+        if (pw.getAttribute('autocomplete') === 'off') {
+          this.reportSuspicious([{
+            type: 'suspicious_form',
+            description: 'Password field has autocomplete disabled — common on phishing pages'
           }]);
-        }
-      } else if (script.textContent) {
-        // Inline script analysis
-        if (this.isSuspiciousScriptContent(script.textContent)) {
-          this.reportSuspiciousContent([{
-            type: 'suspicious_inline_script',
-            element: script,
-            description: 'Inline script with suspicious content'
-          }]);
+          break;
         }
       }
-    });
+    }
   }
 
-  isSuspiciousScriptSource(url) {
-    // Check for suspicious patterns in script sources
-    const suspiciousPatterns = [
-      /\d+\.\d+\.\d+\.\d+/, // IP addresses
-      /[a-z0-9]{20,}\.com/, // Random long domains
-      /bit\.ly|tinyurl|short/, // URL shorteners
-      /\.tk$|\.ml$|\.ga$|\.cf$/ // Suspicious TLDs
-    ];
-
-    return suspiciousPatterns.some(pattern => pattern.test(url.hostname));
-  }
-
-  isSuspiciousScriptContent(content) {
-    const suspiciousPatterns = [
-      /eval\s*\(/i,
-      /document\.write\s*\(/i,
-      /innerHTML\s*=.*<script/i,
-      /crypto.*mine/i,
-      /bitcoin|ethereum|monero/i,
-      /keylogger|keypress.*password/i,
-      /atob\s*\(/i, // Base64 decoding often used in obfuscation
-      /String\.fromCharCode/i // Character code conversion for obfuscation
-    ];
-
-    return suspiciousPatterns.some(pattern => pattern.test(content));
-  }
-
-  detectHiddenElements() {
-    // Look for hidden iframes and divs that might be malicious
-    const hiddenElements = document.querySelectorAll('iframe, div, embed, object');
-    hiddenElements.forEach(element => {
-      const style = window.getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-
-      if ((style.display === 'none' ||
-        style.visibility === 'hidden' ||
-        style.opacity === '0' ||
-        rect.width < 5 ||
-        rect.height < 5) &&
-        (element.tagName.toLowerCase() === 'iframe' ||
-          element.innerHTML.includes('script'))) {
-
-        this.reportSuspiciousContent([{
-          type: 'hidden_malicious_element',
-          element: element,
-          description: `Hidden ${element.tagName.toLowerCase()} element detected`
-        }]);
-      }
-    });
-  }
-
-  detectClickjacking() {
-    // Check if page is being framed
-    if (window.self !== window.top) {
-      try {
-        // Try to access parent location
-        const parentHost = window.parent.location.hostname;
-        if (parentHost !== window.location.hostname) {
-          this.reportSuspiciousContent([{
-            type: 'potential_clickjacking',
-            description: 'Page loaded in iframe from different domain'
-          }]);
-        }
-      } catch (e) {
-        // Cross-origin error - potentially malicious framing
-        this.reportSuspiciousContent([{
-          type: 'cross_origin_framing',
-          description: 'Page framed by unknown origin - potential clickjacking'
+  detectHiddenIframes() {
+    const iframes = document.querySelectorAll('iframe');
+    for (const iframe of iframes) {
+      const style = window.getComputedStyle(iframe);
+      const rect = iframe.getBoundingClientRect();
+      if ((style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' ||
+           rect.width < 3 || rect.height < 3) && iframe.src) {
+        this.reportSuspicious([{
+          type: 'hidden_iframe',
+          description: `Hidden iframe detected loading: ${new URL(iframe.src, location.href).hostname}`
         }]);
       }
     }
   }
 
-  checkForCryptomining() {
-    // Look for common cryptomining scripts and indicators
-    const miningIndicators = [
-      'coinhive',
-      'jsecoin',
-      'crypto-loot',
-      'webminepool',
-      'authedmine',
-      'coin-have',
-      'minero'
-    ];
-
-    const pageContent = document.documentElement.outerHTML.toLowerCase();
-    miningIndicators.forEach(indicator => {
-      if (pageContent.includes(indicator)) {
-        this.reportSuspiciousContent([{
-          type: 'cryptomining_script',
-          description: `Potential cryptomining script detected: ${indicator}`
-        }]);
-      }
-    });
-
-    // Monitor for unusual CPU usage patterns
-    this.monitorCPUUsage();
-  }
-
-  monitorCPUUsage() {
-    let startTime = performance.now();
-    let iterations = 0;
-    let checkCount = 0;
-    const maxChecks = 10;
-
-    const checkCPU = () => {
-      iterations++;
-      const currentTime = performance.now();
-
-      if (currentTime - startTime > 1000) { // Check every second
-        checkCount++;
-
-        // If we can't complete many iterations, CPU might be busy
-        if (iterations < 50) {
-          this.reportSuspiciousContent([{
-            type: 'high_cpu_usage',
-            description: 'Unusually high CPU usage - possible cryptomining'
-          }]);
-          return; // Stop monitoring after detection
-        }
-
-        startTime = currentTime;
-        iterations = 0;
-
-        // Stop after checking for a reasonable time
-        if (checkCount >= maxChecks) {
-          return;
-        }
-      }
-
-      requestAnimationFrame(checkCPU);
-    };
-
-    requestAnimationFrame(checkCPU);
-  }
+  // ─── Form Submission Monitoring ───
 
   monitorForms() {
-    // Monitor form submissions for data exfiltration
-    document.addEventListener('submit', (event) => {
-      const form = event.target;
-      if (form.tagName && form.tagName.toLowerCase() === 'form') {
-        this.analyzeFormSubmission(form);
-      }
+    document.addEventListener('submit', (e) => {
+      const form = e.target;
+      if (!form || form.tagName?.toLowerCase() !== 'form') return;
+      this.analyzeFormSubmission(form);
     });
   }
 
   analyzeFormSubmission(form) {
-    const formData = new FormData(form);
-    const sensitiveFields = ['password', 'ssn', 'social', 'credit', 'card', 'cvv', 'security', 'pin'];
+    const sensitiveFields = ['password','ssn','social','credit','card','cvv','pin','secret'];
+    let hasSensitive = false;
 
-    let hasSensitiveData = false;
-    for (const [key, value] of formData.entries()) {
-      const keyLower = key.toLowerCase();
-      if (sensitiveFields.some(field => keyLower.includes(field))) {
-        hasSensitiveData = true;
-        break;
+    try {
+      const fd = new FormData(form);
+      for (const [key] of fd.entries()) {
+        if (sensitiveFields.some(f => key.toLowerCase().includes(f))) {
+          hasSensitive = true;
+          break;
+        }
+      }
+    } catch (_) { return; }
+
+    if (!hasSensitive) return;
+
+    const action = form.action || window.location.href;
+    try {
+      const actionUrl = new URL(action, window.location.href);
+      if (actionUrl.protocol !== 'https:') {
+        this.showToast('🚨 Sensitive data being sent over insecure connection!');
+      }
+      if (actionUrl.hostname !== window.location.hostname) {
+        this.showToast('🚨 Sensitive data being sent to external domain: ' + actionUrl.hostname);
+      }
+    } catch (_) {
+      this.showToast('🚨 Form submitting to invalid URL!');
+    }
+  }
+
+  // ─── Link Safety Preview ───
+
+  setupLinkSafetyPreview() {
+    // Highlight deceptive links where visible text looks like a URL but doesn't match href
+    this.scanLinksForMismatch();
+
+    // Tooltip on hover showing real destination
+    document.addEventListener('mouseover', (e) => {
+      const link = e.target.closest('a[href]');
+      if (!link) { this.hideTooltip(); return; }
+      this.checkLink(link);
+    });
+
+    document.addEventListener('mouseout', (e) => {
+      const link = e.target.closest('a[href]');
+      if (link) this.hideTooltip();
+    });
+  }
+
+  scanLinksForMismatch() {
+    const links = document.querySelectorAll('a[href]');
+    for (const link of links) {
+      if (this.isDeceptiveLink(link)) {
+        link.style.outline = '2px dashed #e74c3c';
+        link.style.outlineOffset = '2px';
+        link.setAttribute('data-loxten-warning', 'Displayed URL does not match actual destination');
       }
     }
+  }
 
-    if (hasSensitiveData) {
-      const action = form.action || window.location.href;
+  isDeceptiveLink(link) {
+    const text = link.textContent.trim();
+    const href = link.getAttribute('href') || '';
+
+    // Skip non-URL text, very short text, or same-page anchors
+    if (!text || text.length < 8 || href.startsWith('#') || href.startsWith('javascript:')) return false;
+
+    // Check if text looks like a URL
+    const urlPattern = /^https?:\/\/[^\s]+$|^www\.[^\s]+$|^[a-z0-9-]+\.[a-z]{2,}[\/\S]*$/i;
+    if (!urlPattern.test(text)) return false;
+
+    // Extract domain from displayed text
+    let textDomain;
+    try {
+      const normalized = text.startsWith('http') ? text : 'https://' + text;
+      textDomain = new URL(normalized).hostname.toLowerCase();
+    } catch (_) { return false; }
+
+    // Extract domain from actual href
+    let hrefDomain;
+    try {
+      const hrefUrl = new URL(href, window.location.href);
+      hrefDomain = hrefUrl.hostname.toLowerCase();
+    } catch (_) { return false; }
+
+    // Mismatch = deceptive
+    return textDomain !== hrefDomain;
+  }
+
+  checkLink(link) {
+    const href = link.getAttribute('href') || '';
+
+    // Warn on data: or javascript: URIs
+    if (href.startsWith('data:') || href.startsWith('javascript:')) {
+      this.showLinkTooltip(link, `⚠️ ${href.split(':')[0]}: URI — may execute code`);
+      return;
+    }
+
+    // Show warning if deceptive
+    if (link.hasAttribute('data-loxten-warning')) {
       try {
-        const actionUrl = new URL(action, window.location.href);
+        const realDomain = new URL(href, location.href).hostname;
+        this.showLinkTooltip(link, `⚠️ Link text doesn't match destination: ${realDomain}`);
+      } catch (_) {}
+    }
+  }
 
-        if (actionUrl.protocol !== 'https:') {
-          this.showRealTimeWarning('🚨 Sensitive data being sent over insecure connection!');
-        }
+  showLinkTooltip(anchor, text) {
+    this.hideTooltip();
+    const tip = document.createElement('div');
+    tip.id = 'loxten-link-tooltip';
+    tip.textContent = text;
+    Object.assign(tip.style, {
+      position: 'fixed', zIndex: '999999997',
+      background: '#1a1a2e', color: '#e74c3c',
+      padding: '6px 12px', borderRadius: '6px', fontSize: '12px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      fontWeight: '600', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+      border: '1px solid #e74c3c33', pointerEvents: 'none',
+      maxWidth: '320px', wordBreak: 'break-word',
+    });
 
-        if (actionUrl.hostname !== window.location.hostname) {
-          this.showRealTimeWarning('🚨 Sensitive data being sent to external domain!');
-        }
-      } catch (e) {
-        this.showRealTimeWarning('🚨 Form submitting to invalid URL!');
+    const rect = anchor.getBoundingClientRect();
+    tip.style.left = Math.min(rect.left, window.innerWidth - 340) + 'px';
+    tip.style.top = (rect.bottom + 6) + 'px';
+
+    document.body.appendChild(tip);
+    this.linkTooltip = tip;
+  }
+
+  hideTooltip() {
+    if (this.linkTooltip) { this.linkTooltip.remove(); this.linkTooltip = null; }
+  }
+
+  // ─── Annoyance Blocker ───
+
+  async initAnnoyanceBlocker() {
+    try {
+      const settings = await chrome.runtime.sendMessage({ type: 'get_settings' });
+      if (settings && settings.blockAnnoyances) {
+        this.applyAnnoyanceBlocker();
       }
+    } catch (_) {
+      // Extension context may be invalid, skip
     }
   }
 
-  analyzeNewElement(element) {
-    // Analyze dynamically added elements
-    if (!element.tagName) return;
+  applyAnnoyanceBlocker() {
+    // Inject CSS to hide known annoyance elements
+    const style = document.createElement('style');
+    style.id = 'loxten-annoyance-blocker';
+    style.textContent = `
+      /* ── Cookie Consent Banners ── */
+      #onetrust-consent-sdk,
+      #onetrust-banner-sdk,
+      .onetrust-pc-dark-filter,
+      #CybotCookiebotDialog,
+      #CybotCookiebotDialogBodyUnderlay,
+      .cc-window,
+      .cc-banner,
+      .cc-revoke,
+      #cookie-notice,
+      #cookie-law-info-bar,
+      #cookie-consent,
+      .cookie-consent,
+      .cookie-banner,
+      .cookie-popup,
+      .cookie-notice,
+      .cookie-alert,
+      .cookie-warning,
+      .cookieConsent,
+      .js-cookie-consent,
+      [id*="cookie-banner"],
+      [id*="cookie-consent"],
+      [id*="cookie-notice"],
+      [id*="cookieBanner"],
+      [id*="gdpr"],
+      [class*="cookie-banner"],
+      [class*="cookie-consent"],
+      [class*="cookie-notice"],
+      [class*="cookieBanner"],
+      [class*="gdpr-banner"],
+      [class*="consent-banner"],
+      [class*="CookieConsent"],
+      .osano-cm-window,
+      .osano-cm-dialog,
+      #termly-code-snippet-support,
+      .termly-consent-banner,
+      .evidon-consent-button,
+      .evidon-barrier-page,
+      #truste-consent-track,
+      .truste_box_overlay,
+      .truste_overlay,
+      .qc-cmp2-container,
+      #qc-cmp2-ui,
+      .sp_veil,
+      [id*="sp_message_container"],
+      .cmp-container,
+      /* ── Chat Widgets ── */
+      #intercom-container,
+      .intercom-lightweight-app,
+      .intercom-messenger-frame,
+      #drift-widget,
+      #drift-frame-controller,
+      #drift-frame-chat,
+      .drift-conductor-item,
+      #hubspot-messages-iframe-container,
+      #fc_frame,
+      .crisp-client,
+      #crisp-chatbox,
+      [id*="tidio"],
+      .tawk-min-container,
+      #tawk-to-chat-widget,
+      #zsiq_float,
+      .zopim,
+      [id*="livechat"],
+      [class*="livechat-widget"],
+      .fb_dialog,
+      .fb-customerchat,
+      #beacon-container,
+      #HW_badge,
+      #HW_badge_cont,
+      /* ── Newsletter / Subscription Popups ── */
+      [class*="newsletter-popup"],
+      [class*="newsletter-modal"],
+      [class*="subscribe-popup"],
+      [class*="subscribe-modal"],
+      [class*="email-popup"],
+      [class*="signup-popup"],
+      [class*="exit-intent"],
+      [class*="exitIntent"],
+      [id*="newsletter-popup"],
+      [id*="newsletter-modal"],
+      [id*="subscribe-popup"],
+      [id*="email-popup"],
+      /* ── Push Notification Prompts ── */
+      [class*="push-notification"],
+      [class*="notification-prompt"],
+      [class*="web-push"],
+      [id*="push-notification"],
+      [id*="onesignal"],
+      .onesignal-slidedown-container,
+      #onesignal-slidedown-container,
+      /* ── Overlays / Backdrops from above ── */
+      .cookie-overlay,
+      .consent-overlay {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        height: 0 !important;
+        overflow: hidden !important;
+      }
 
-    switch (element.tagName.toLowerCase()) {
-      case 'script':
-        if (element.src && this.isSuspiciousScriptSource(new URL(element.src))) {
-          this.reportSuspiciousContent([{
-            type: 'dynamic_malicious_script',
-            element: element,
-            description: 'Suspicious script loaded dynamically'
-          }]);
-        }
-        break;
+      /* Fix body scroll lock that consent banners sometimes add */
+      body.cookie-modal-open,
+      body.modal-open-cookie,
+      body.no-scroll-cookie,
+      html.sp-message-open {
+        overflow: auto !important;
+        position: static !important;
+      }
+    `;
 
-      case 'iframe':
-        const style = window.getComputedStyle(element);
-        if (style.display === 'none' ||
-          style.visibility === 'hidden' ||
-          element.width < 10 ||
-          element.height < 10) {
-          this.reportSuspiciousContent([{
-            type: 'hidden_iframe',
-            element: element,
-            description: 'Hidden iframe loaded dynamically'
-          }]);
+    const inject = () => {
+      if (document.head) {
+        document.head.appendChild(style);
+      } else {
+        document.documentElement.appendChild(style);
+      }
+    };
+
+    if (document.head) {
+      inject();
+    } else {
+      // Head not ready yet — wait for it
+      const headObserver = new MutationObserver(() => {
+        if (document.head) {
+          inject();
+          headObserver.disconnect();
         }
-        break;
+      });
+      headObserver.observe(document.documentElement, { childList: true });
     }
+
+    // Also remove annoyances that are added dynamically after page load
+    this.setupAnnoyanceObserver();
   }
+
+  setupAnnoyanceObserver() {
+    const annoyanceSelectors = [
+      '#onetrust-consent-sdk', '#CybotCookiebotDialog', '.cc-window',
+      '#intercom-container', '.intercom-lightweight-app',
+      '#drift-widget', '#drift-frame-controller',
+      '#hubspot-messages-iframe-container', '.crisp-client',
+      '#tawk-to-chat-widget', '.onesignal-slidedown-container',
+      '[id*="sp_message_container"]', '.qc-cmp2-container',
+    ];
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          const el = /** @type {Element} */ (node);
+          // Check if the added element itself matches
+          for (const sel of annoyanceSelectors) {
+            try {
+              if (el.matches && el.matches(sel)) {
+                el.remove();
+                break;
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    });
+
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    this.observers.push(observer);
+  }
+
+  // ─── DOM Observer ───
+
+  setupDOMObserver() {
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type !== 'childList') continue;
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          // Check dynamically added iframes
+          if (node.tagName === 'IFRAME') {
+            const style = window.getComputedStyle(node);
+            if (style.display === 'none' || style.visibility === 'hidden' ||
+                node.width < 5 || node.height < 5) {
+              this.reportSuspicious([{
+                type: 'hidden_iframe',
+                description: 'Hidden iframe loaded dynamically'
+              }]);
+            }
+          }
+          // Re-scan links in added content
+          const links = node.querySelectorAll ? node.querySelectorAll('a[href]') : [];
+          for (const link of links) {
+            if (this.isDeceptiveLink(link)) {
+              link.style.outline = '2px dashed #e74c3c';
+              link.style.outlineOffset = '2px';
+              link.setAttribute('data-loxten-warning', 'Displayed URL does not match actual destination');
+            }
+          }
+        }
+      }
+    });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    this.observers.push(observer);
+  }
+
+  // ─── Warning UI ───
 
   showSecurityWarning(analysis) {
-    if (this.warningShown) return; // Don't show multiple warnings
-
+    if (this.warningShown) return;
     this.warningShown = true;
-    const modal = this.createWarningModal(analysis);
-    document.body.appendChild(modal);
-  }
 
-  createWarningModal(analysis) {
     const modal = document.createElement('div');
     modal.id = 'loxten-warning-modal';
     modal.style.cssText = `
-      position: fixed !important;
-      top: 0 !important;
-      left: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
-      background: rgba(0,0,0,0.9) !important;
-      z-index: 999999999 !important;
-      display: flex !important;
-      justify-content: center !important;
-      align-items: center !important;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      position:fixed!important;top:0!important;left:0!important;width:100%!important;height:100%!important;
+      background:rgba(0,0,0,0.92)!important;z-index:999999999!important;display:flex!important;
+      justify-content:center!important;align-items:center!important;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif!important;
     `;
 
+    const riskColor = analysis.riskScore >= 80 ? '#dc3545' : analysis.riskScore >= 60 ? '#fd7e14' : '#ffc107';
     const content = document.createElement('div');
     content.style.cssText = `
-      background: white !important;
-      padding: 30px !important;
-      border-radius: 10px !important;
-      max-width: 500px !important;
-      text-align: center !important;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
-      margin: 20px !important;
+      background:#111!important;padding:30px!important;border-radius:12px!important;max-width:460px!important;
+      text-align:center!important;box-shadow:0 8px 32px rgba(0,0,0,0.6)!important;margin:20px!important;
+      border:1px solid ${riskColor}33!important;
     `;
-
-    const riskColor = analysis.riskScore >= 80 ? '#dc3545' :
-      analysis.riskScore >= 60 ? '#fd7e14' : '#ffc107';
-
     content.innerHTML = `
-      <div style="color: ${riskColor}; font-size: 48px; margin-bottom: 16px;">⚠️</div>
-      <h2 style="color: ${riskColor}; margin: 0 0 16px 0; font-size: 24px;">Security Warning</h2>
-      <p style="margin: 0 0 20px 0; font-size: 16px; color: #333;"><strong>Risk Score:</strong> ${analysis.riskScore}/100</p>
-      <div style="text-align: left; margin: 20px 0; max-height: 200px; overflow-y: auto;">
-        ${analysis.threats.map(threat =>
-      `<div style="margin: 10px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid ${riskColor};">
-            <strong style="color: ${riskColor}; text-transform: uppercase; font-size: 12px;">${threat.type.replace(/_/g, ' ')}</strong><br>
-            <span style="color: #555; font-size: 14px;">${threat.description}</span>
-          </div>`
-    ).join('')}
+      <div style="color:${riskColor};font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:${riskColor};margin:0 0 8px;font-size:22px;font-weight:700">Security Warning</h2>
+      <p style="margin:0 0 20px;font-size:14px;color:#888">Risk Score: <strong style="color:${riskColor}">${analysis.riskScore}/100</strong></p>
+      <div style="text-align:left;margin:20px 0;max-height:200px;overflow-y:auto">
+        ${analysis.threats.map(t => `
+          <div style="margin:8px 0;padding:12px;background:#1a1a1a;border-radius:8px;border-left:3px solid ${riskColor}">
+            <strong style="color:${riskColor};font-size:11px;text-transform:uppercase;letter-spacing:0.05em">${t.type.replace(/_/g,' ')}</strong><br>
+            <span style="color:#aaa;font-size:13px">${t.description}</span>
+          </div>
+        `).join('')}
       </div>
-      <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
-        <button id="loxten-continue" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 14px;">Continue Anyway</button>
-        <button id="loxten-goback" style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 14px;">Go Back</button>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:24px">
+        <button id="loxten-continue" style="background:#222;color:#ccc;border:1px solid #333;padding:11px 28px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">Continue Anyway</button>
+        <button id="loxten-goback" style="background:${riskColor};color:#fff;border:none;padding:11px 28px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">Go Back</button>
       </div>
-      <div style="margin-top: 20px; font-size: 12px; color: #666;">
-        Protected by Loxten Security Extension
-      </div>
+      <p style="margin-top:18px;font-size:11px;color:#555">Protected by Loxten</p>
     `;
 
     modal.appendChild(content);
+    document.body.appendChild(modal);
 
-    // Event listeners
-    content.querySelector('#loxten-continue').addEventListener('click', () => {
-      modal.remove();
-      this.warningShown = false;
-    });
-
-    content.querySelector('#loxten-goback').addEventListener('click', () => {
-      history.back();
-    });
-
-    return modal;
+    content.querySelector('#loxten-continue').addEventListener('click', () => { modal.remove(); this.warningShown = false; });
+    content.querySelector('#loxten-goback').addEventListener('click', () => history.back());
   }
 
-  showRealTimeWarning(message) {
-    // Show brief notification for real-time warnings
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-      position: fixed !important;
-      top: 20px !important;
-      right: 20px !important;
-      background: #dc3545 !important;
-      color: white !important;
-      padding: 15px 20px !important;
-      border-radius: 8px !important;
-      z-index: 999999998 !important;
-      max-width: 300px !important;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
-      font-size: 14px !important;
-      line-height: 1.4 !important;
-      animation: slideIn 0.3s ease-out !important;
+  showToast(message) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position:fixed!important;top:16px!important;right:16px!important;
+      background:#1a1a2e!important;color:#e74c3c!important;padding:14px 18px!important;
+      border-radius:8px!important;z-index:999999998!important;max-width:340px!important;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;
+      box-shadow:0 4px 16px rgba(0,0,0,0.4)!important;font-size:13px!important;
+      border:1px solid #e74c3c33!important;line-height:1.4!important;
     `;
-
-    // Add CSS animation
-    if (!document.getElementById('loxten-styles')) {
-      const style = document.createElement('style');
-      style.id = 'loxten-styles';
-      style.textContent = `
-        @keyframes slideIn {
-          from { transform: translateX(100%); opacity: 0; }
-          to { transform: translateX(0); opacity: 1; }
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
-    notification.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <strong>Loxten</strong>
-        <button onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px; margin-left: auto;">×</button>
+    toast.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px">
+        <strong style="color:#e8e8e8">Loxten</strong>
+        <button onclick="this.closest('div').parentElement.remove()" style="background:none;border:none;color:#888;cursor:pointer;font-size:16px;margin-left:auto">×</button>
       </div>
-      <div style="margin-top: 5px;">${message}</div>
+      <div style="margin-top:6px">${message}</div>
     `;
-
-    document.body.appendChild(notification);
-
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      if (notification.parentNode) {
-        notification.remove();
-      }
-    }, 5000);
+    document.body.appendChild(toast);
+    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 6000);
   }
 
-  handleTrackerDetection(message) {
-    this.trackerCount++;
-    console.log(`Loxten blocked tracker: ${message.domain}`);
-  }
+  // ─── Reporting ───
 
-  highlightSuspiciousElements(elements) {
-    elements.forEach(elementInfo => {
-      if (elementInfo.element && elementInfo.element.parentNode) {
-        // Add red border to suspicious elements
-        elementInfo.element.style.border = '2px solid red !important';
-        elementInfo.element.style.boxShadow = '0 0 10px rgba(255,0,0,0.5) !important';
-
-        // Add warning tooltip
-        elementInfo.element.title = `Loxten Warning: ${elementInfo.description}`;
-      }
-    });
-  }
-
-  reportSuspiciousContent(indicators) {
-    // Send suspicious content to background script
+  reportSuspicious(indicators) {
     chrome.runtime.sendMessage({
       type: 'report_suspicious',
-      data: {
-        url: window.location.href,
-        domain: window.location.hostname,
-        indicators: indicators,
-        timestamp: Date.now()
-      }
-    }).catch(() => {
-      // Extension context might be invalid
-      console.log('Could not report suspicious content - extension context invalid');
-    });
-
-    // Log for debugging
-    console.log('Loxten detected suspicious content:', indicators);
+      data: { url: location.href, domain: location.hostname, indicators, timestamp: Date.now() }
+    }).catch(() => {});
   }
 
+  // ─── Cleanup ───
+
   cleanup() {
-    // Clean up observers when page unloads
-    this.observers.forEach(observer => {
-      observer.disconnect();
-    });
+    this.observers.forEach(o => o.disconnect());
     this.observers = [];
+    this.hideTooltip();
   }
 }
 
-// Initialize content script
 let loxtenContent;
 try {
   loxtenContent = new LoxtenContentScript();
-
-  // Cleanup on page unload
-  window.addEventListener('beforeunload', () => {
-    if (loxtenContent) {
-      loxtenContent.cleanup();
-    }
-  });
-} catch (error) {
-  console.error('Loxten content script failed to initialize:', error);
+  window.addEventListener('beforeunload', () => { if (loxtenContent) loxtenContent.cleanup(); });
+} catch (e) {
+  console.error('[Loxten] content script init failed:', e);
 }
