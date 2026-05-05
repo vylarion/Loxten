@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - Loxten</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 720px;
+      margin: 40px auto;
+      padding: 0 20px;
+      background: #0a0a0a;
+      color: #d4d4d4;
+      line-height: 1.6;
+    }
+    h1 { color: #f0f0f0; font-size: 24px; border-bottom: 1px solid #1e1e1e; padding-bottom: 12px; }
+    h2 { color: #e0e0e0; font-size: 18px; margin-top: 28px; }
+    p, li { color: #b0b0b0; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #1e1e1e; font-size: 13px; }
+    th { color: #e0e0e0; font-weight: 600; background: #0e0e0e; }
+    td { color: #b0b0b0; }
+    .updated { color: #888; font-size: 13px; }
+    code { background: #141414; padding: 2px 6px; border-radius: 3px; font-size: 13px; color: #c0c0c0; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy for Loxten</h1>
+  <p class="updated"><strong>Last updated:</strong> May 5, 2026</p>
+
+  <h2>Data Collection</h2>
+  <p>Loxten does not collect, store, or transmit any personal data, browsing history, or user information. All processing occurs entirely within the user's browser on the local device.</p>
+
+  <h2>Permissions Used</h2>
+  <p>The extension requests the following Chrome permissions and their purposes:</p>
+  <table>
+    <tr><th>Permission</th><th>Purpose</th></tr>
+    <tr><td><code>activeTab</code></td><td>Read the URL of the currently active tab for security analysis</td></tr>
+    <tr><td><code>webNavigation</code></td><td>Detect page navigation events to trigger security analysis</td></tr>
+    <tr><td><code>storage</code></td><td>Save user settings, whitelist, and statistics locally on the device</td></tr>
+    <tr><td><code>webRequest</code></td><td>Read HTTP response headers to audit security header configuration</td></tr>
+    <tr><td><code>tabs</code></td><td>Query tab information and update badge indicators</td></tr>
+    <tr><td><code>declarativeNetRequest</code></td><td>Block known tracker domains at the network request level</td></tr>
+  </table>
+  <p>No permission is used to collect or transmit data.</p>
+
+  <h2>External Services</h2>
+  <p>The only external service Loxten communicates with is the public RDAP (Registration Data Access Protocol) service at <code>rdap.org</code>. When visiting a website, the extension may send the site's domain name (e.g., <code>example.com</code>) to <code>rdap.org</code> to look up the domain registration date. This is used solely to determine if a domain was recently registered (a common indicator of phishing sites).</p>
+  <ul>
+    <li>No personal information is sent.</li>
+    <li>Domain names are standard public information available through any WHOIS or RDAP lookup.</li>
+    <li>No analytics, tracking, or advertising services are used.</li>
+  </ul>
+
+  <h2>Data Storage</h2>
+  <p>All user data is stored locally in the browser using <code>chrome.storage.sync</code> and <code>chrome.storage.local</code>:</p>
+  <ul>
+    <li><strong>Settings</strong> (protection toggles, alert level) are synced across Chrome browsers signed in to the same Google Account.</li>
+    <li><strong>Whitelist entries</strong> and <strong>statistics</strong> are stored locally on the device.</li>
+  </ul>
+  <p>Users can delete all stored data at any time via the Loxten Settings panel (Clear Data button).</p>
+
+  <h2>Data Sharing</h2>
+  <p>Loxten does not share any data with third parties. No user data is sold, rented, or otherwise transferred.</p>
+
+  <h2>Changes to This Policy</h2>
+  <p>If this privacy policy is updated, the version date at the top will be revised.</p>
+
+  <h2>Contact</h2>
+  <p>For questions about this privacy policy, open an issue on the Loxten GitHub repository.</p>
+</body>
+</html>

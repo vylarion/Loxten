@@ -33,11 +33,6 @@ const config = {
 		}
 	},
 
-	// Optional: Add compiler options for better extension performance
-	compilerOptions: {
-		// Disable CSS hash for more predictable styling in extension
-		cssHash: ({ hash, css }) => `svelte-${hash(css).slice(0, 6)}`
-	}
-};
+	};
 
 export default config;

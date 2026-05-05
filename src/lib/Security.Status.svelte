@@ -11,7 +11,8 @@
 		Certificate,
 		ClockCounterClockwise,
 		Warning,
-		CaretDown
+		CaretDown,
+		ShieldCheck
 	} from 'phosphor-svelte';
 
 	export let securityData: SecurityData;
@@ -44,6 +45,7 @@
 	$: headerGrade = securityData.headerAudit?.grade || '—';
 	$: domainAgeDays = securityData.domainAge?.ageDays;
 	$: hasThreats = securityData.threats.length > 0;
+	$: isWhitelisted = securityData.whitelisted === true;
 </script>
 
 <div class="status">
@@ -61,7 +63,10 @@
 		</div>
 		<div class="score-info">
 			<h3 class="score-title">
-				{#if securityData.isSecure}
+				{#if isWhitelisted}
+					<ShieldCheck size={14} weight="fill" />
+					Trusted Site
+				{:else if securityData.isSecure}
 					<CheckCircle size={14} weight="fill" />
 					Site Looks Safe
 				{:else}
@@ -70,7 +75,9 @@
 				{/if}
 			</h3>
 			<p class="score-desc">
-				{#if securityData.riskScore < 30}
+				{#if isWhitelisted}
+					This domain is on your trusted sites list. Analysis is bypassed.
+				{:else if securityData.riskScore < 30}
 					No major concerns for this site.
 				{:else if securityData.riskScore < 60}
 					Some potential issues — review below.

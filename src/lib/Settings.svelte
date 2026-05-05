@@ -17,6 +17,7 @@
 		blockPhishing: true,
 		blockTrackers: true,
 		blockAnnoyances: true,
+		linkSafetyPreview: false,
 		showWarnings: true,
 		autoScan: true,
 		notificationLevel: 'medium',
@@ -101,6 +102,7 @@
 			blockPhishing: true,
 			blockTrackers: true,
 			blockAnnoyances: true,
+			linkSafetyPreview: false,
 			showWarnings: true,
 			autoScan: true,
 			notificationLevel: 'medium',
@@ -173,6 +175,16 @@
 				/>
 			</label>
 			<p class="toggle-hint">Cookie banners, chat widgets, newsletter popups, push prompts.</p>
+			<label class="toggle-row">
+				<span class="toggle-label">Highlight Link Mismatches</span>
+				<input
+					type="checkbox"
+					class="toggle"
+					bind:checked={settings.linkSafetyPreview}
+					on:change={handleToggle}
+				/>
+			</label>
+			<p class="toggle-hint">Marks links where visible text differs from the actual destination URL.</p>
 		</div>
 	</section>
 

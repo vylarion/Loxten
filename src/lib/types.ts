@@ -35,6 +35,7 @@ export interface SecurityData {
   lastScan: Date | null;
   headerAudit?: HeaderAudit | null;
   domainAge?: DomainAge | null;
+  whitelisted?: boolean;
 }
 
 export interface Settings {
@@ -42,6 +43,7 @@ export interface Settings {
   blockPhishing: boolean;
   blockTrackers: boolean;
   blockAnnoyances: boolean;
+  linkSafetyPreview: boolean;
   showWarnings: boolean;
   autoScan: boolean;
   notificationLevel: 'low' | 'medium' | 'high';

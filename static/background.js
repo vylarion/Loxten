@@ -47,6 +47,7 @@ class LoxtenBackground {
       blockPhishing: true,
       blockTrackers: true,
       blockAnnoyances: true,
+      linkSafetyPreview: false,
       showWarnings: true,
       autoScan: true,
       notificationLevel: 'medium',
@@ -141,26 +142,8 @@ class LoxtenBackground {
       ['responseHeaders']
     );
 
-    // Count blocked trackers via declarativeNetRequest feedback
-    // onRuleMatchedDebug works for unpacked extensions (dev mode)
-    try {
-      if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
-        chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
-          const tabId = info.request?.tabId;
-          if (tabId && tabId > 0) {
-            const current = this.tabTrackerCounts.get(tabId) || 0;
-            this.tabTrackerCounts.set(tabId, current + 1);
-            this.stats.trackersBlocked++;
-            // Debounce save
-            clearTimeout(this._trackerSaveTimer);
-            this._trackerSaveTimer = setTimeout(() => this.saveStats(), 3000);
-          }
-        });
-        console.log('[Loxten] Real-time tracker counting active (onRuleMatchedDebug)');
-      }
-    } catch (e) {
-      console.log('[Loxten] onRuleMatchedDebug not available, using getMatchedRules fallback');
-    }
+    // Tracker counting via getMatchedRules (works in both dev and published modes)
+    // Popup requests count via getTabTrackerCount which queries the DNR API
 
     // Messages from popup / content
     chrome.runtime.onMessage.addListener((msg, sender, respond) => {
@@ -255,6 +238,16 @@ class LoxtenBackground {
     return { checks, score, total, grade };
   }
 
+  // ─── Whitelist ───
+
+  async isWhitelisted(domain) {
+    try {
+      const r = await chrome.storage.local.get('loxten_whitelist');
+      const list = r.loxten_whitelist || [];
+      return list.some(entry => domain === entry.domain || domain.endsWith('.' + entry.domain));
+    } catch (_) { return false; }
+  }
+
   // ─── URL Analysis ───
 
   async analyzeURL(url, tabId) {
@@ -262,6 +255,14 @@ class LoxtenBackground {
       const urlObj = new URL(url);
       const domain = urlObj.hostname.toLowerCase();
       if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('about:')) return;
+
+      // Skip analysis for whitelisted domains
+      if (await this.isWhitelisted(domain)) {
+        const clean = { url, domain, threats: [], riskScore: 0, trackersBlocked: 0, timestamp: Date.now(), isSecure: true, whitelisted: true };
+        await this.storeAnalysis(tabId, clean);
+        this.updateBadge(tabId, clean);
+        return;
+      }
 
       this.stats.sitesScanned++;
       const analysis = { url, domain, threats: [], riskScore: 0, trackersBlocked: 0, timestamp: Date.now(), isSecure: true };
@@ -483,8 +484,14 @@ class LoxtenBackground {
         case 'get_analysis': {
           const tabId = msg.tabId || sender.tab?.id;
           const a = await this.getStoredAnalysis(tabId);
-          // Attach real tracker count for this tab
           if (a && tabId) {
+            // Override with whitelisted clean state if domain was added to whitelist
+            if (a.domain && await this.isWhitelisted(a.domain)) {
+              a.threats = [];
+              a.riskScore = 0;
+              a.isSecure = true;
+              a.whitelisted = true;
+            }
             a.trackersBlocked = await this.getTabTrackerCount(tabId);
           }
           respond(a);
@@ -514,6 +521,12 @@ class LoxtenBackground {
         case 'settings_updated': {
           this.settings = { ...this.settings, ...msg.settings };
           await this.setupTrackerBlocking();
+          try {
+            const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+            for (const tab of tabs) {
+              chrome.tabs.sendMessage(tab.id, { type: 'settings_updated', settings: this.settings }).catch(() => {});
+            }
+          } catch (_) {}
           respond({ success: true });
           break;
         }
@@ -547,11 +560,6 @@ class LoxtenBackground {
 
   // Get tracker count for a specific tab
   async getTabTrackerCount(tabId) {
-    // First try in-memory count (from onRuleMatchedDebug)
-    const memCount = this.tabTrackerCounts.get(tabId) || 0;
-    if (memCount > 0) return memCount;
-
-    // Fallback: query declarativeNetRequest for matched rules
     try {
       const navTimestamp = this.tabNavTimestamps.get(tabId) || 0;
       const result = await chrome.declarativeNetRequest.getMatchedRules({
@@ -564,7 +572,7 @@ class LoxtenBackground {
       }
       return count;
     } catch (_) {
-      return memCount;
+      return 0;
     }
   }
 }

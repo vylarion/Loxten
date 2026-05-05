@@ -6,6 +6,7 @@ class LoxtenContentScript {
     this.warningShown = false;
     this.observers = [];
     this.linkTooltip = null;
+    this.linkSafetyEnabled = true;
     if (this.shouldRun()) this.init();
   }
 
@@ -17,6 +18,7 @@ class LoxtenContentScript {
 
   init() {
     this.setupMessageListener();
+    this.loadSettings();
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => this.startMonitoring());
     } else {
@@ -24,11 +26,20 @@ class LoxtenContentScript {
     }
   }
 
+  async loadSettings() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'get_settings' });
+      if (res) {
+        this.linkSafetyEnabled = res.linkSafetyPreview !== false;
+      }
+    } catch (_) {}
+  }
+
   startMonitoring() {
     try {
       this.analyzeCurrentPage();
       this.monitorForms();
-      this.setupLinkSafetyPreview();
+      if (this.linkSafetyEnabled) this.setupLinkSafetyPreview();
       this.setupDOMObserver();
       this.initAnnoyanceBlocker();
     } catch (e) {
@@ -42,10 +53,30 @@ class LoxtenContentScript {
     chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       try {
         if (msg.type === 'security_warning') this.showSecurityWarning(msg.analysis);
+        if (msg.type === 'settings_updated') this.onSettingsUpdated(msg.settings);
         respond({ success: true });
       } catch (e) {
         respond({ error: e.message });
       }
+    });
+  }
+
+  onSettingsUpdated(settings) {
+    const wasEnabled = this.linkSafetyEnabled;
+    this.linkSafetyEnabled = settings.linkSafetyPreview !== false;
+    if (this.linkSafetyEnabled && !wasEnabled) {
+      this.setupLinkSafetyPreview();
+    } else if (!this.linkSafetyEnabled && wasEnabled) {
+      this.disableLinkSafetyPreview();
+    }
+  }
+
+  disableLinkSafetyPreview() {
+    this.hideTooltip();
+    document.querySelectorAll('[data-loxten-warning]').forEach(el => {
+      el.style.outline = '';
+      el.style.outlineOffset = '';
+      el.removeAttribute('data-loxten-warning');
     });
   }
 
@@ -514,12 +545,14 @@ class LoxtenContentScript {
             }
           }
           // Re-scan links in added content
-          const links = node.querySelectorAll ? node.querySelectorAll('a[href]') : [];
-          for (const link of links) {
-            if (this.isDeceptiveLink(link)) {
-              link.style.outline = '2px dashed #e74c3c';
-              link.style.outlineOffset = '2px';
-              link.setAttribute('data-loxten-warning', 'Displayed URL does not match actual destination');
+          if (this.linkSafetyEnabled) {
+            const links = node.querySelectorAll ? node.querySelectorAll('a[href]') : [];
+            for (const link of links) {
+              if (this.isDeceptiveLink(link)) {
+                link.style.outline = '2px dashed #e74c3c';
+                link.style.outlineOffset = '2px';
+                link.setAttribute('data-loxten-warning', 'Displayed URL does not match actual destination');
+              }
             }
           }
         }
